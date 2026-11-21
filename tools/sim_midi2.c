@@ -7,6 +7,7 @@
 #include "platform/pads.h"
 
 u16 ADC_Max[64];
+u16 PadCalibration[4] = {256, 1023, 512, 769};
 
 u8 midi2_active(void)
 {
