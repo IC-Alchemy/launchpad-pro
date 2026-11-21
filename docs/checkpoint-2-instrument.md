@@ -24,7 +24,9 @@ repository.
   one Note Off (the Off comes when the last of them is released).
 - Settings (root, scale, octave, layout, absolute root, velocity mode, curve,
   pressure mode, pressure threshold, DIN mirror, channel) are kept in flash.
-  They are saved about 2 s after the last change once no notes are held.
+  They are saved once 2 s have passed since the last change and since you
+  last pressed or released a grid pad, with no note held (the save stalls
+  the device for a few tens of ms, so it waits for a pause in playing).
   Unplugging sooner may lose the last change.
 - The "MIDI" port (UMP group 1) is still bridged to the DIN port in both
   directions. The stage 1 MIDI clock and the "Setup pauses receive" behaviour
@@ -36,9 +38,15 @@ repository.
 
 Play page (the menu is closed):
 
-- In-scale pads are dark blue, the root note is bright blue, notes outside
-  the scale are dim grey (this only shows in the chromatic layouts). A
-  sounding pad lights white.
+- Pad colours (red, green, blue on the 0 to 63 LED scale):
+  - root note: bright blue (0, 20, 63);
+  - the 3rd and 5th notes of the scale, counting the root as the 1st (E and
+    G in C major; F and Bb in C Minor Pentatonic): lighter blue (8, 24, 40);
+  - every other note of the scale: dark blue (0, 4, 16);
+  - notes outside the scale: dim grey (4, 4, 4), only in the chromatic
+    layouts;
+  - a pad whose note would be above 127: unlit, and it plays nothing;
+  - a sounding pad: white (63, 63, 63).
 - Buttons 91 and 92 are octave up and down, 93 and 94 are root down and up
   (one semitone, wrapping B to C). They are dim white. Octave is 0 to 7. Held
   notes keep their pitch when you change these.
@@ -127,15 +135,16 @@ Result: flashed OK? (yes/no), notes.
 ## 2. Default grid colours
 
 After the reboot, with the monitor running: look at the grid. Expected: C
-major in blue, the C pads bright blue, all other pads (in this layout) in
-scale. Press pad 11: expected Note On for note 60 (C3 in the numbering where
+major in blue, the C pads bright blue, the E and G pads a lighter blue, the
+other pads (D, F, A, B) dark blue; in this layout every pad is in scale. Press pad 11: expected Note On for note 60 (C3 in the numbering where
 60 is C3; the monitor may call it C4 or C3), white pad while held, Note Off on
 release. Check the top-right pad is higher in pitch than the bottom-left.
 
 ## 3. Octave and root arrows
 
 Press button 91, then 92, several times: the notes of pad 11 move by 12 and
-stop at octave 0 and 7. Press 94 and 93: pad 11 moves by one semitone per
+stop at octave 0 and 7. At octaves 6 and 7 the top pads would be above note
+127: they stay unlit and send nothing. That is by design, not dead pads. Press 94 and 93: pad 11 moves by one semitone per
 press, wrapping B to C, and the grid recolours to the new key. Hold a pad
 while pressing an arrow: the held note must keep its pitch and stop on
 release.
@@ -185,7 +194,10 @@ Pressure follows the harder pad. Release all pads: a final Channel Pressure of
 
 Turn DIN mirror on (pad 42). Connect a DIN monitor. Expected: pad notes and
 pressure appear on the DIN MIDI Out as MIDI 1.0 messages (7-bit), as well as
-on USB. Turn it off (pad 41): DIN goes quiet. Check the USB "MIDI" port to
+on USB. Steady hold: hold one pad with steady pressure for 5 s. The DIN
+monitor should show only an occasional pressure message, not a stream (a
+stream here would overload the DIN port). Turn it off (pad 41): DIN goes
+quiet. Check the USB "MIDI" port to
 DIN bridge still works (as in checkpoint 1 section 4).
 
 ## 10. Channel 10
@@ -204,8 +216,16 @@ within 1 s: record whether it was lost (expected possible, and not a fault).
 
 Hold Setup for longer than 300 ms: the menu shows while held. Release it: the
 play page returns. A short tap opens the menu and keeps it open until the
-next tap. Hold a pad, open the menu, release the pad, close the menu: no note
-and no stray Note Off in the monitor.
+next tap.
+
+Held pads and the menu, two cases:
+
+- Hold a pad (its Note On shows), open the menu, release the pad, close the
+  menu. Expected: exactly one Note Off, at the moment the menu opens, and
+  nothing when you release the pad or close the menu.
+- Hold a pad, open the menu, close the menu, then release the pad.
+  Expected: again exactly one Note Off when the menu opens, and nothing at
+  the close or the release (no new note, no pressure while still held).
 
 ## 13. Duplicate pitches
 
@@ -219,8 +239,15 @@ of the two pads.
 
 As in checkpoint 1 section 7 (switch the driver to the in-box one, Setup LED
 amber: not red now). Expected: velocity and pressure are 7-bit and the
-instrument still plays. Also try the MIDI 1.0 Protocol request from
-checkpoint 1 section 5 to put the MIDI 2.0 connection into MIDI 1.0 Protocol.
+instrument still plays. Steady hold: hold one pad with steady pressure for
+5 s, once with DIN mirror off and once with it on. The USB monitor (and the
+DIN monitor) should show only an occasional pressure message, not a stream.
+Also try the MIDI 1.0 Protocol request from checkpoint 1 section 5 to put the
+MIDI 2.0 connection into MIDI 1.0 Protocol.
+
+If you hold a pad while the connection changes (driver switch, or the
+protocol request), the connection ends its note: the pad then stays
+silent, its release sends nothing and the next press plays normally.
 
 ## 15. Feel
 
@@ -237,19 +264,19 @@ Fill in "Result" and "Notes". "Expected" is what I predict.
 | # | Check | Expected (verify) | Result | Notes |
 |---|---|---|---|---|
 | 1 | Flash the stage 2 image | Flashes and reboots | | |
-| 2 | Default grid colours, pad 11 = C3 (60) | Blue scale, bright blue roots, pad 11 sends 60 | | |
-| 3 | Octave and root arrows | Octave 0 to 7, root wraps B to C, held notes keep pitch | | |
+| 2 | Default grid colours, pad 11 = C3 (60) | Bright blue roots, lighter blue E and G, dark blue others; pad 11 sends 60 | | |
+| 3 | Octave and root arrows | Octave 0 to 7, root wraps B to C, held notes keep pitch; top pads unlit and silent above note 127 | | |
 | 4 | Every layout, absolute root | Five layouts as named, pad 11 stays C with absolute root | | |
 | 5 | Minor Pentatonic | Only 5 pitch classes | | |
 | 6 | Velocity: peak-window, zero-latency, fixed, curves | Soft, medium, hard separate on both pads; Fixed = 0xFFFF | | |
 | 7 | Poly pressure smoothness | Continuous, not 128 steps | | |
 | 8 | Channel pressure and Off | Returns to 0 on release; Off sends none | | |
-| 9 | DIN mirror | Notes and pressure on DIN, 7-bit | | |
+| 9 | DIN mirror | Notes and pressure on DIN, 7-bit; steady hold sends only occasional pressure | | |
 | 10 | Channel 10 | Seen in the monitor | | |
 | 11 | Settings survive unplug | All restored | | |
-| 12 | Menu peek | Hold shows, release closes, held-pad case silent | | |
+| 12 | Menu peek | Hold shows, release closes; held pad: one Note Off when the menu opens, then nothing | | |
 | 13 | Duplicate pitches | Light together, one Note On, one Note Off | | |
-| 14 | MIDI 1.0 fallback | 7-bit velocity and pressure | | |
+| 14 | MIDI 1.0 fallback | 7-bit velocity and pressure; steady hold sends only occasional pressure (USB and DIN) | | |
 | 15 | Feel of the velocity modes | (describe) | | |
 
 ## 17. What to send back
