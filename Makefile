@@ -39,6 +39,7 @@ TEST_SOURCES += tests/test_usb_prop.c src/usb/usb_prop.c src/usb/usb_midi2.c src
 TEST_SOURCES += tests/test_usb_data.c
 TEST_SOURCES += tests/test_pad_velocity.c src/pads/pad_velocity.c
 TEST_SOURCES += tests/test_scales.c src/scales/scales.c
+TEST_SOURCES += tests/test_settings.c src/instrument/settings.c tests/stubs/io_stub.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
