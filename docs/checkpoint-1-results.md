@@ -19,7 +19,7 @@ expected, except three that were **not tested** (deferred, not failed):
 | 6a | DIN input continues across alt 1, 0, 1 | not tested |
 | 6c | EP1 framing in alt 1 | not tested |
 
-Both are added to the final hardware pass (stage 4).
+All three are added to the final hardware pass (stage 4).
 
 ## Endpoint (Windows MIDI Services)
 
