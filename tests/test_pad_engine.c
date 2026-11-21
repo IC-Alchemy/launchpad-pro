@@ -393,6 +393,130 @@ static void test_pitch_minus1_ignored(void)
     CHECK_EQ(pe_notes_active(), 0);
 }
 
+static void test_forget_all_sends_nothing(void)
+{
+    uint32_t t;
+    int mark;
+
+    /* two held pads with pressure flowing, one pad capturing */
+    setup();
+    zero_latency();
+    set_adcmax(11, 679);
+    set_adcmax(88, 679);
+    set_raw(11, 3000);
+    set_raw(88, 3000);
+    pe_press(11, 60, 0, 0, 0);
+    pe_press(88, 72, 0, 0, 0);
+    for (t = 1; t <= 10; t++)
+        pe_poll(t);
+    pe_configure(VEL_PEAK_WINDOW, CURVE_LINEAR, PRESS_POLY, THRESH_MED);
+    set_adcmax(45, 679);
+    pe_press(45, 64, 0, 0, 11);
+    CHECK(io_n >= 4);
+    mark = io_n;
+    pe_forget_all();
+    CHECK_EQ(io_n, mark);
+    CHECK_EQ(rec_n, 2);
+    CHECK_EQ(pe_notes_active(), 0);
+    /* the pads still held: no pressure, no Note On from the capture, and
+     * their release is silent */
+    for (t = 12; t <= 40; t++) {
+        set_raw(11, (uint16_t)(3000 - 10 * t));
+        set_raw(45, 3000);
+        pe_poll(t);
+    }
+    pe_release(11, 41);
+    pe_release(88, 41);
+    pe_release(45, 41);
+    pe_poll(50);
+    CHECK_EQ(io_n, mark);
+    CHECK_EQ(rec_n, 2);
+    /* the pitch counts were reset: a fresh press sounds and ends */
+    zero_latency();
+    pe_press(11, 60, 0, 0, 60);
+    CHECK_EQ(io_n, mark + 1);
+    CHECK_EQ(io_log[mark].kind, 'N');
+    CHECK_EQ(io_log[mark].note, 60);
+    pe_release(11, 70);
+    CHECK_EQ(io_n, mark + 2);
+    CHECK_EQ(io_log[mark + 1].kind, 'F');
+    CHECK_EQ(pe_notes_active(), 0);
+}
+
+static void test_forget_all_resets_channel_pressure(void)
+{
+    uint32_t t;
+    int mark;
+
+    /* channel pressure above 0 when the transport changes: no 0 is sent on
+     * USB, and the next note starts from 0 (a release with no pressure sent
+     * sends no 0 either) */
+    setup();
+    pe_configure(VEL_ZERO_LATENCY, CURVE_LINEAR, PRESS_CHANNEL, THRESH_MED);
+    set_adcmax(11, 679);
+    set_raw(11, 3000);
+    pe_press(11, 60, 0, 0, 0);
+    for (t = 1; t <= 10; t++)
+        pe_poll(t);
+    CHECK_EQ(io_log[io_n - 1].kind, 'C');
+    mark = io_n;
+    pe_forget_all();
+    pe_release(11, 11);
+    CHECK_EQ(io_n, mark);
+    set_raw(11, 2000);
+    pe_press(11, 60, 0, 0, 20);
+    for (t = 21; t <= 30; t++)
+        pe_poll(t);
+    pe_release(11, 31);
+    CHECK_EQ(io_n, mark + 2);
+    CHECK_EQ(io_log[mark].kind, 'N');
+    CHECK_EQ(io_log[mark + 1].kind, 'F');
+}
+
+static void test_forget_all_ends_din_notes(void)
+{
+    int mark;
+
+    /* DIN never sees the USB transport change: its notes get their Note
+     * Off (once per pitch), USB gets nothing */
+    setup();
+    zero_latency();
+    set_adcmax(11, 679);
+    set_adcmax(14, 679);
+    set_adcmax(88, 679);
+    pe_press(11, 60, 3, 1, 0);
+    pe_press(14, 60, 3, 1, 0);
+    pe_press(88, 72, 3, 0, 0);
+    mark = io_n;
+    pe_forget_all();
+    CHECK_EQ(io_n, mark + 1);
+    CHECK_EQ(io_log[mark].kind, 'F');
+    CHECK_EQ(io_log[mark].port, DINMIDI);
+    CHECK_EQ(io_log[mark].ch, 3);
+    CHECK_EQ(io_log[mark].note, 60);
+    pe_release(11, 5);
+    pe_release(14, 5);
+    pe_release(88, 5);
+    CHECK_EQ(io_n, mark + 1);
+
+    /* DIN channel pressure above 0 goes back to 0 there, not on USB */
+    setup();
+    pe_configure(VEL_ZERO_LATENCY, CURVE_LINEAR, PRESS_CHANNEL, THRESH_MED);
+    set_adcmax(11, 679);
+    set_raw(11, 3000);
+    pe_press(11, 60, 3, 1, 0);
+    pe_poll(1);
+    mark = io_n;
+    pe_forget_all();
+    CHECK_EQ(io_n, mark + 2);
+    CHECK_EQ(io_log[mark].kind, 'F');
+    CHECK_EQ(io_log[mark].port, DINMIDI);
+    CHECK_EQ(io_log[mark + 1].kind, 'C');
+    CHECK_EQ(io_log[mark + 1].port, DINMIDI);
+    CHECK_EQ(io_log[mark + 1].ch, 3);
+    CHECK_EQ(io_log[mark + 1].v, 0);
+}
+
 void test_pad_engine_all(void)
 {
     RUN(test_zero_latency_note_on_at_press);
@@ -409,4 +533,7 @@ void test_pad_engine_all(void)
     RUN(test_setup_entry_during_capture_sends_nothing);
     RUN(test_peak_window_across_ms_wrap);
     RUN(test_pitch_minus1_ignored);
+    RUN(test_forget_all_sends_nothing);
+    RUN(test_forget_all_resets_channel_pressure);
+    RUN(test_forget_all_ends_din_notes);
 }

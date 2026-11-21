@@ -51,6 +51,15 @@ void pe_poll(uint32_t now);
  * the last pe_release of a held pad). */
 void pe_release_all(void);
 
+/* The USB transport changed (alternate setting or protocol) and has ended
+ * every Standalone note itself: forget every note without sending anything
+ * on USB. Every pad goes idle (pads still held are ignored until their
+ * release), the pitch counts and channel pressure start from 0, and the
+ * sounding callback is not called. DIN never sees the change, so each DIN
+ * note gets its Note Off (once per pitch) and DIN channel pressure goes back
+ * to 0 if it isn't. */
+void pe_forget_all(void);
+
 /* Any pad capturing or sounding. */
 uint8_t pe_notes_active(void);
 

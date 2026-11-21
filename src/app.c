@@ -50,8 +50,30 @@
 // millisecond counter, advanced by the timer event
 static volatile uint32_t g_ms = 0;
 
+// the USB alternate setting and protocol last seen
+static u8 g_usb_alt;
+static u8 g_usb_midi2;
+
+// The transport ends every Standalone note itself when the alternate setting
+// or protocol changes; the pad engine must forget them too.  Checked before
+// each pad event as well, so a press in the same main-loop pass as the change
+// is not forgotten after it has sounded on the new transport.
+static void check_transport(void)
+{
+    u8 a = midi2_usb_alt();
+    u8 m = midi2_active();
+
+    if (a != g_usb_alt || m != g_usb_midi2)
+    {
+        g_usb_alt = a;
+        g_usb_midi2 = m;
+        ui_transport_changed(g_ms);
+    }
+}
+
 static void main_loop(void)
 {
+    check_transport();
     ui_poll(g_ms);
 }
 
@@ -59,6 +81,7 @@ static void main_loop(void)
 
 void app_surface_event(u8 type, u8 index, u8 value)
 {
+    check_transport();
     switch (type)
     {
         case TYPEPAD:
@@ -118,6 +141,8 @@ void app_timer_event()
 
 void app_init(const u16 *adc_raw)
 {
+    g_usb_alt = midi2_usb_alt();
+    g_usb_midi2 = midi2_active();
     pe_init(adc_raw, ui_on_sounding);
     ui_init(g_ms);
     midi2_set_main_loop_hook(main_loop);

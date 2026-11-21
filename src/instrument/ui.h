@@ -30,6 +30,10 @@ const struct settings *ui_settings(void);
  * copy, reconfigure the pad engine, redraw and settings_touch. */
 void ui_apply_settings(const struct settings *s, uint32_t now);
 uint8_t ui_menu_open(void);
+/* The USB alternate setting or protocol changed (the transport has ended
+ * every Standalone note): pe_forget_all, nothing lights as sounding, redraw
+ * the play page (if the menu is closed) and the Setup LED. */
+void ui_transport_changed(uint32_t now);
 /* the pad engine's pe_sounding_fn */
 void ui_on_sounding(uint8_t pitch, uint8_t on);
 

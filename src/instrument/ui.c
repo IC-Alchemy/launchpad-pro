@@ -358,6 +358,16 @@ void ui_apply_settings(const struct settings *s, uint32_t now)
 	settings_touch(now);
 }
 
+void ui_transport_changed(uint32_t now)
+{
+	pe_forget_all();
+	memset(g_sounding, 0, sizeof g_sounding);
+	if (!g_menu)
+		draw_all();
+	draw_setup_led();
+	g_led_t = now;
+}
+
 uint8_t ui_menu_open(void)
 {
 	return g_menu;

@@ -511,6 +511,31 @@ void pe_release_all(void)
     channel_zero();
 }
 
+void pe_forget_all(void)
+{
+    uint8_t slot;
+
+    for (slot = 0; slot < 64; slot++)
+    {
+        struct pe_pad *p = &g_pad[slot];
+
+        /* DIN: the last holder of a pitch ends it, as silence() would */
+        if (p->state == PE_HELD && g_count[p->pitch] != 0 && --g_count[p->pitch] == 0 && p->din)
+        {
+            io_note_off(DINMIDI, p->ch, p->pitch);
+        }
+        p->state = PE_IDLE;
+    }
+    memset(g_count, 0, sizeof g_count);
+    g_nheld = 0;
+    if (g_chan.sent7 != 0)
+    {
+        io_channel_pressure(DINMIDI, g_chan.ch, 0);
+    }
+    g_chan.sent12 = 0;
+    g_chan.sent7 = 0;
+}
+
 uint8_t pe_notes_active(void)
 {
     uint8_t slot;

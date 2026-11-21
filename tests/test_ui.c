@@ -466,6 +466,44 @@ static void test_setup_led_reflects_protocol(void)
 	CHECK_EQ(io_setup_led[2], 0);
 }
 
+static void test_transport_change_forgets_held_notes(void)
+{
+	int mark;
+
+	setup();
+	zero_latency(T0);
+	ui_pad(25, 100, T0 + 10);
+	CHECK(led_is(18, 63, 63, 63));
+	CHECK(led_is(25, 63, 63, 63));
+	mark = io_n;
+	ui_transport_changed(T0 + 20);
+	CHECK_EQ(io_n, mark);              /* the transport ended the note */
+	CHECK(led_is(18, 0, 20, 63));
+	CHECK(led_is(25, 0, 20, 63));
+	CHECK(led_is(32, 0, 20, 63));
+	ui_poll(T0 + 30);
+	ui_pad(25, 0, T0 + 40);            /* the held pad's release: silent */
+	CHECK_EQ(io_n, mark);
+	/* the same pitch on another pad plays at once */
+	ui_pad(18, 100, T0 + 50);
+	CHECK_EQ(io_n, mark + 1);
+	CHECK_EQ(io_log[mark].kind, 'N');
+	CHECK_EQ(io_log[mark].note, 72);
+	CHECK(led_is(25, 63, 63, 63));
+	ui_pad(18, 0, T0 + 60);
+	CHECK_EQ(io_n, mark + 2);
+	CHECK_EQ(io_log[mark + 1].kind, 'F');
+
+	/* in the menu: the menu stays drawn */
+	setup();
+	setup_tap(T0);
+	ui_transport_changed(T0 + 100);
+	CHECK_EQ(ui_menu_open(), 1);
+	CHECK(led_is(95, 63, 63, 63));
+	CHECK(led_is(61, 0, 63, 0));
+	CHECK_EQ(io_n, 0);
+}
+
 void test_ui_all(void)
 {
 	RUN(test_play_page_colours_default);
@@ -490,4 +528,5 @@ void test_ui_all(void)
 	RUN(test_apply_settings_rejects_invalid);
 	RUN(test_apply_settings_change);
 	RUN(test_setup_led_reflects_protocol);
+	RUN(test_transport_change_forgets_held_notes);
 }
