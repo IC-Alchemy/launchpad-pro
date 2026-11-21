@@ -239,6 +239,21 @@ static uint8_t changed12(uint16_t p12, uint16_t last)
     return d >= PRESSURE_HYST || ((p12 == 0 || p12 == 4095) && p12 != last);
 }
 
+/* The 7-bit rule: hysteresis around the last value's step. The value moves
+ * only when p12 leaves [last7 x 32 - PRESSURE_HYST7, last7 x 32 + 31 +
+ * PRESSURE_HYST7], so a pad resting on a step boundary doesn't toggle;
+ * 0 and 4095 always reach 0 and 127. */
+static uint8_t changed7(uint16_t p12, uint8_t last7)
+{
+    uint16_t base = (uint16_t)(last7 << 5);
+
+    if (p12 == 0 || p12 == 4095)
+    {
+        return (uint8_t)(p12 >> 5) != last7;
+    }
+    return p12 + PRESSURE_HYST7 < base || p12 > base + 31 + PRESSURE_HYST7;
+}
+
 static void pressure_out(uint8_t port, uint8_t ch, uint8_t note, uint16_t p12)
 {
     if (note == PE_CHANNEL)
@@ -262,14 +277,14 @@ static uint8_t pressure_send(uint16_t sent[PE_DESTS], uint16_t *sent12, uint8_t 
 
     if (interval_passed(sent[PE_DEST_USB], now16) &&
         (io_port_is_midi2(USBSTANDALONE) ? changed12(p12, *sent12)
-                                         : (p12 >> 5) != (*sent12 >> 5)))
+                                         : changed7(p12, (uint8_t)(*sent12 >> 5))))
     {
         pressure_out(USBSTANDALONE, ch, note, p12);
         *sent12 = p12;
         sent[PE_DEST_USB] = now16;
         changed = 1;
     }
-    if (din && interval_passed(sent[PE_DEST_DIN], now16) && (p12 >> 5) != *sent7)
+    if (din && interval_passed(sent[PE_DEST_DIN], now16) && changed7(p12, *sent7))
     {
         pressure_out(DINMIDI, ch, note, p12);
         *sent7 = (uint8_t)(p12 >> 5);

@@ -12,10 +12,12 @@
 
 /* Pressure output: a MIDI 2.0 destination gets a new value when it moved by
  * at least PRESSURE_HYST (12-bit units) or just reached 0 or 4095; a 7-bit
- * destination when its top 7 bits changed. Either way at most one message
- * per pitch (or for channel pressure) per destination every
- * PRESSURE_MIN_INTERVAL_MS. */
-#define PRESSURE_HYST 16
+ * destination when the 12-bit value left its last 7-bit step widened by
+ * PRESSURE_HYST7 on each side (so it reads as a new step), or just reached 0
+ * or 4095. Either way at most one message per pitch (or for channel
+ * pressure) per destination every PRESSURE_MIN_INTERVAL_MS. */
+#define PRESSURE_HYST 32
+#define PRESSURE_HYST7 16
 #define PRESSURE_MIN_INTERVAL_MS 5
 
 /* Called when a pitch starts (sounding = 1) or stops (0) sounding: on the

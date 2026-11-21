@@ -88,8 +88,11 @@ hardware, so I need your feel for them:
 - Pressure thresholds, in raw 12-bit ADC counts: Low 1792, Med 2048, High
   2304. Pressure reads 0 at or below the threshold and reaches full at 3076.
 - Noise filter and hysteresis: a MIDI 2.0 destination gets a new pressure
-  value only when it moved by 16 counts of 4096 (`PRESSURE_HYST`), and every
-  destination gets at most one message per pitch every 5 ms.
+  value only when it moved by 32 counts of 4096 (`PRESSURE_HYST`). A 7-bit
+  destination (DIN, and USB in MIDI 1.0) gets a new value only when the
+  pressure left its last 7-bit step by more than half a step, 16 counts of
+  4096 (`PRESSURE_HYST7`), so a pad resting on a step boundary does not
+  toggle. Every destination gets at most one message per pitch every 5 ms.
 - In Zero-latency mode the pressure filter is seeded at the strike, so the
   first pressure messages right after the hit may start high and then fall.
 

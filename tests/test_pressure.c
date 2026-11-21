@@ -140,9 +140,10 @@ static void test_pressure_reaches_ends(void)
     if (i >= 0)
         CHECK_EQ(io_log[i].v, 0xFFFFFFFFu);
 
-    /* and down to nothing: 0 is sent */
+    /* and down to nothing: 0 is sent (raw 2058 is p12 39, at least
+     * PRESSURE_HYST above 0, so it goes out first) */
     setup(PRESS_POLY, 1);
-    set_raw(45, 2056);
+    set_raw(45, 2058);
     press(45, 64, 0, 0);
     for (t = 1; t <= 10; t++)
         poll(t);
@@ -214,6 +215,99 @@ static void test_pressure_jitter_does_not_flood(void)
     CHECK(count_kind('P', n0) <= 3);
 }
 
+/* Fixed-seed LCG (deterministic): uniform noise in [-amp, amp] */
+static uint32_t lcg;
+
+static int noise(int amp)
+{
+    lcg = lcg * 1103515245u + 12345u;
+    return (int)((lcg >> 16) % (uint32_t)(2 * amp + 1)) - amp;
+}
+
+/* A pad resting at raw `rest` with uniform +-amp raw noise every ms: settle
+ * for 200 ms, then count the poly pressure messages per port in the next
+ * 1000 ms. */
+static void noise_run(uint16_t rest, int amp, uint8_t midi2, int *usb, int *din)
+{
+    uint32_t t;
+    int i;
+
+    setup(PRESS_POLY, midi2);
+    lcg = 12345u + rest;
+    set_raw(45, rest);
+    press(45, 64, 1, 0);
+    for (t = 1; t <= 200; t++) {
+        set_raw(45, (uint16_t)(rest + noise(amp)));
+        poll(t);
+    }
+    io_n = 0;
+    for (t = 201; t <= 1200; t++) {
+        set_raw(45, (uint16_t)(rest + noise(amp)));
+        poll(t);
+    }
+    *usb = 0;
+    *din = 0;
+    for (i = 0; i < io_n; i++) {
+        if (io_log[i].kind != 'P')
+            continue;
+        if (io_log[i].port == USBSTANDALONE)
+            (*usb)++;
+        else if (io_log[i].port == DINMIDI)
+            (*din)++;
+    }
+}
+
+/* the lowest raw value whose pressure is at least p12 */
+static uint16_t raw_for(uint16_t p12)
+{
+    uint16_t r = PRESSURE_START_MED;
+
+    while (r < PRESSURE_FULL_RAW && pad_pressure12(r, THRESH_MED) < p12)
+        r++;
+    return r;
+}
+
+static void test_pressure_noise_does_not_flood_7bit(void)
+{
+    /* rest values on a 7-bit step boundary (p12 = k * 32) and in between */
+    static const uint16_t p12_rest[] = {
+        32 * 10, 32 * 10 + 16, 32 * 40, 32 * 40 + 8, 32 * 64, 32 * 64 + 24,
+        32 * 100, 32 * 100 + 16, 32 * 120,
+    };
+    unsigned k;
+    int usb, din;
+
+    for (k = 0; k < sizeof p12_rest / sizeof p12_rest[0]; k++) {
+        uint16_t rest = raw_for(p12_rest[k]);
+
+        /* (a) Standalone in MIDI 1.0 Protocol, (b) DIN mirror */
+        noise_run(rest, 10, 0, &usb, &din);
+        if (usb > 5 || din > 5)
+            printf("  7-bit rest raw %u (p12 %u): usb %d din %d\n", rest,
+                   pad_pressure12(rest, THRESH_MED), usb, din);
+        CHECK(usb <= 5);
+        CHECK(din <= 5);
+    }
+}
+
+static void test_pressure_noise_does_not_flood_midi2(void)
+{
+    static const uint16_t p12_rest[] = {32 * 10, 32 * 40 + 8, 32 * 64, 32 * 100 + 16, 32 * 120};
+    unsigned k;
+    int usb, din;
+
+    for (k = 0; k < sizeof p12_rest / sizeof p12_rest[0]; k++) {
+        uint16_t rest = raw_for(p12_rest[k]);
+
+        noise_run(rest, 10, 1, &usb, &din);
+        if (usb > 5 || din > 5)
+            printf("  midi2 rest raw %u (p12 %u): usb %d din %d\n", rest,
+                   pad_pressure12(rest, THRESH_MED), usb, din);
+        CHECK(usb <= 5);
+        CHECK(din <= 5);
+    }
+}
+
 static void test_seven_bit_dest_sends_on_change_only(void)
 {
     uint32_t t;
@@ -242,31 +336,97 @@ static void test_seven_bit_dest_sends_on_change_only(void)
         CHECK_EQ(io_log[prev].v >> 25, 127);
     CHECK(spacing_ok('P', USBSTANDALONE));
 
-    /* a move of more than PRESSURE_HYST inside one 7-bit step is not sent:
-     * raw 2058 and 2063 give p12 39 and 59, both 1 in 7 bits */
+    /* a move of more than PRESSURE_HYST that stays inside the 7-bit
+     * hysteresis band is not sent: raw 2081 and 2091 give p12 131 and 171
+     * (7-bit 4 and 5); step 4's band is 4 x 32 - 16 .. 4 x 32 + 31 + 16,
+     * 112..175 */
     setup(PRESS_POLY, 0);
-    set_raw(45, 2058);
+    CHECK_EQ(pad_pressure12(2081, THRESH_MED), 131);
+    CHECK_EQ(pad_pressure12(2091, THRESH_MED), 171);
+    set_raw(45, 2081);
     press(45, 64, 1, 0);
     for (t = 1; t <= 10; t++)
         poll(t);
     CHECK_EQ(count_kind('P', 0), 2);
-    set_raw(45, 2063);
+    set_raw(45, 2091);
     for (t = 11; t <= 100; t++)
         poll(t);
     CHECK_EQ(count_kind('P', 0), 2);
     /* the same on DIN while Standalone is MIDI 2.0 and does send it */
     setup(PRESS_POLY, 1);
-    set_raw(45, 2058);
+    set_raw(45, 2081);
     press(45, 64, 1, 0);
     for (t = 1; t <= 10; t++)
         poll(t);
-    set_raw(45, 2063);
+    set_raw(45, 2091);
     for (t = 11; t <= 100; t++)
         poll(t);
     i = last_of('P', DINMIDI, 64);
     CHECK(i >= 0);
     CHECK_EQ(count_kind('P', 0), 3);
     CHECK(last_of('P', USBSTANDALONE, 64) > i);
+}
+
+/* hold raw at v for 60 ms (the filter settles), from *t on */
+static void hold_raw(uint16_t v, uint32_t *t)
+{
+    uint32_t end = *t + 60;
+
+    set_raw(45, v);
+    for (; *t < end; (*t)++)
+        poll(*t);
+}
+
+/* the last 7-bit poly pressure value sent on port, or -1 */
+static int last7(uint8_t port)
+{
+    int i = last_of('P', port, 64);
+
+    return i < 0 ? -1 : (int)(io_log[i].v >> 25);
+}
+
+static void test_seven_bit_hysteresis_and_ends(void)
+{
+    uint32_t t = 1;
+    int n;
+
+    /* Standalone in MIDI 1.0 Protocol and DIN, both 7-bit */
+    setup(PRESS_POLY, 0);
+    set_raw(45, raw_for(32 * 20 + 4));
+    press(45, 64, 1, 0);
+    hold_raw(raw_for(32 * 20 + 4), &t);
+    CHECK_EQ(last7(USBSTANDALONE), 20);
+    CHECK_EQ(last7(DINMIDI), 20);
+    n = count_kind('P', 0);
+    /* into step 21 but inside step 20's band (upper edge 20 x 32 + 47) */
+    hold_raw(raw_for(32 * 21 + 8), &t);
+    CHECK_EQ(count_kind('P', 0), n);
+    /* past the band: 21 goes out */
+    hold_raw(raw_for(32 * 21 + 16), &t);
+    CHECK_EQ(last7(USBSTANDALONE), 21);
+    CHECK_EQ(last7(DINMIDI), 21);
+    n = count_kind('P', 0);
+    /* back into step 20 but inside step 21's band (lower edge 21 x 32 - 16) */
+    hold_raw(raw_for(32 * 21 - 12), &t);
+    CHECK_EQ(count_kind('P', 0), n);
+    /* below the band: 20 goes out */
+    hold_raw(raw_for(32 * 21 - 24), &t);
+    CHECK_EQ(last7(USBSTANDALONE), 20);
+    CHECK_EQ(last7(DINMIDI), 20);
+    /* the ends are always reached */
+    hold_raw(PRESSURE_FULL_RAW, &t);
+    CHECK_EQ(last7(USBSTANDALONE), 127);
+    CHECK_EQ(last7(DINMIDI), 127);
+    hold_raw(PRESSURE_START_MED, &t);
+    CHECK_EQ(last7(USBSTANDALONE), 0);
+    CHECK_EQ(last7(DINMIDI), 0);
+    /* a slow creep to the top: 127 at the end, from inside step 126's band */
+    hold_raw(raw_for(32 * 126 + 20), &t);
+    CHECK_EQ(last7(DINMIDI), 126);
+    hold_raw(raw_for(4080), &t);
+    CHECK_EQ(last7(DINMIDI), 127);
+    CHECK(spacing_ok('P', USBSTANDALONE));
+    CHECK(spacing_ok('P', DINMIDI));
 }
 
 static void test_din_pressure_is_seven_bit(void)
@@ -554,7 +714,10 @@ void test_pressure_all(void)
     RUN(test_pressure_rate_cap);
     RUN(test_pressure_rate_cap_across_ms_wrap);
     RUN(test_pressure_jitter_does_not_flood);
+    RUN(test_pressure_noise_does_not_flood_7bit);
+    RUN(test_pressure_noise_does_not_flood_midi2);
     RUN(test_seven_bit_dest_sends_on_change_only);
+    RUN(test_seven_bit_hysteresis_and_ends);
     RUN(test_din_pressure_is_seven_bit);
     RUN(test_shared_pitch_uses_max);
     RUN(test_channel_mode_max_and_zero);
