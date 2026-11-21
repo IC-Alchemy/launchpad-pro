@@ -63,9 +63,20 @@ static u8 g_held[PAD_INDEXES];
 
 //______________________________________________________________________________
 
+// minimum brightness (of MAXLED 63) for a held pad, so even the softest hit
+// visibly lights it
+#define PAD_LED_MIN 8
+
 static void set_pad_led(u8 index, u8 level)
 {
     hal_plot_led(TYPEPAD, index, level, level, level);
+}
+
+// brightness 0..63 for a held pad with 16-bit velocity v
+static u8 held_pad_level(u16 v)
+{
+    u8 level = (u8)(v >> 10);
+    return level < PAD_LED_MIN ? PAD_LED_MIN : level;
 }
 
 static void update_setup_led(void)
@@ -111,7 +122,7 @@ void app_surface_event(u8 type, u8 index, u8 value)
                 
                 g_vel[index] = v;
                 g_held[index] = 1;
-                set_pad_led(index, (u8)(v >> 10));
+                set_pad_led(index, held_pad_level(v));
                 hal_send_note_on2(USBSTANDALONE, 0, index, v);
             }
             else if (g_held[index])
