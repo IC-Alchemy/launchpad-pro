@@ -357,6 +357,57 @@ static void test_settings_saved_after_quiet(void)
 	CHECK_EQ(io_flash_writes, 1);
 }
 
+/* poll every ms over [from, to] */
+static void poll_span(uint32_t from, uint32_t to)
+{
+	uint32_t t;
+
+	for (t = from; t <= to; t++)
+		ui_poll(t);
+}
+
+static void test_settings_save_waits_for_playing_to_stop(void)
+{
+	uint32_t t0 = T0 + 100, t, last = 0;
+
+	/* an octave change, then a short tap every 500 ms for 5 s: the save
+	 * (a flash page erase that stalls the device) never lands mid-phrase */
+	setup();
+	tap(91, t0);
+	for (t = t0 + 1; t <= t0 + 5000; t++) {
+		if ((t - t0) % 500 == 0) {
+			tap(11, t);
+			last = t;
+		}
+		ui_poll(t);
+	}
+	CHECK_EQ(io_flash_writes, 0);
+	/* then 2 s of silence: exactly one write, at the end of it */
+	poll_span(t0 + 5001, last + SETTINGS_SAVE_QUIET_MS - 1);
+	CHECK_EQ(io_flash_writes, 0);
+	poll_span(last + SETTINGS_SAVE_QUIET_MS, last + SETTINGS_SAVE_QUIET_MS + 3000);
+	CHECK_EQ(io_flash_writes, 1);
+	CHECK_EQ(io_flash[0 + 5 + 2], 5);  /* the octave byte: 4 + 1 */
+}
+
+static void test_settings_save_in_menu_ignores_earlier_playing(void)
+{
+	uint32_t t0 = T0 + 100;
+
+	/* an octave change, a tap on the play page, then the menu opens (no
+	 * note can sound there): the save follows the change, not the tap */
+	setup();
+	tap(91, t0);
+	tap(11, t0 + 1500);
+	ui_poll(t0 + 1500);
+	setup_tap(t0 + 1600);
+	CHECK_EQ(ui_menu_open(), 1);
+	poll_span(t0 + 1600, t0 + SETTINGS_SAVE_QUIET_MS - 1);
+	CHECK_EQ(io_flash_writes, 0);
+	ui_poll(t0 + SETTINGS_SAVE_QUIET_MS);
+	CHECK_EQ(io_flash_writes, 1);
+}
+
 static void test_apply_settings_rejects_invalid(void)
 {
 	struct settings s;
@@ -392,9 +443,11 @@ static void test_apply_settings_change(void)
 	CHECK(led_is(11, 0, 20, 63));     /* redrawn, no longer white */
 	ui_pad(11, 0, T0 + 40);           /* released by the apply: silent */
 	CHECK_EQ(io_n, 2);
-	ui_poll(T0 + 30 + SETTINGS_SAVE_QUIET_MS - 1);
+	/* the save waits for quiet after the last pad event (the release at
+	 * T0 + 40), which comes after the change */
+	ui_poll(T0 + 40 + SETTINGS_SAVE_QUIET_MS - 1);
 	CHECK_EQ(io_flash_writes, 0);
-	ui_poll(T0 + 30 + SETTINGS_SAVE_QUIET_MS);
+	ui_poll(T0 + 40 + SETTINGS_SAVE_QUIET_MS);
 	CHECK_EQ(io_flash_writes, 1);
 }
 
@@ -432,6 +485,8 @@ void test_ui_all(void)
 	RUN(test_menu_reopens_on_last_page);
 	RUN(test_pad_held_across_menu_is_silent);
 	RUN(test_settings_saved_after_quiet);
+	RUN(test_settings_save_waits_for_playing_to_stop);
+	RUN(test_settings_save_in_menu_ignores_earlier_playing);
 	RUN(test_apply_settings_rejects_invalid);
 	RUN(test_apply_settings_change);
 	RUN(test_setup_led_reflects_protocol);

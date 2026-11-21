@@ -58,6 +58,8 @@ static uint32_t g_led_t;        /* ms counter at the last Setup LED update */
 static uint8_t g_menu;          /* menu open */
 static uint8_t g_page;          /* PAGE_*: shown in the menu, kept while closed */
 static uint8_t g_peek;          /* the Setup press held now opened the menu */
+static uint32_t g_play_t;       /* ms counter at the last grid press or release
+                                 * on the play page */
 
 /* A menu pad: the settings field it sets, the value, its colour family and
  * whether a tap toggles the field instead. */
@@ -234,6 +236,7 @@ void ui_init(uint32_t now)
 	g_menu = 0;
 	g_page = PAGE_SCALE;
 	g_peek = 0;
+	g_play_t = now - SETTINGS_SAVE_QUIET_MS;
 	draw_all();
 	draw_setup_led();
 	g_led_t = now;
@@ -288,6 +291,7 @@ void ui_pad(uint8_t index, uint8_t value, uint32_t now)
 		return;
 	}
 	if (is_grid(index)) {
+		g_play_t = now;
 		if (value) {
 			struct scale_ctx c;
 
@@ -330,7 +334,12 @@ void ui_poll(uint32_t now)
 		g_led_t = now;
 		draw_setup_led();
 	}
-	settings_poll(&g_s, now, pe_notes_active());
+	/* A save erases a flash page and stalls the device for tens of ms, so
+	 * it waits until the player has been still for the quiet time too, not
+	 * just for a moment between notes. No note sounds in the menu. */
+	settings_poll(&g_s, now,
+	              pe_notes_active() ||
+	              (!g_menu && (uint32_t)(now - g_play_t) < SETTINGS_SAVE_QUIET_MS));
 }
 
 const struct settings *ui_settings(void)

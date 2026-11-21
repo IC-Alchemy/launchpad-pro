@@ -20,7 +20,10 @@ void ui_init(uint32_t now);
 void ui_pad(uint8_t index, uint8_t value, uint32_t now);
 /* TYPESETUP events: value 0 = release */
 void ui_setup(uint8_t value, uint32_t now);
-/* pe_poll, Setup LED every 100 ms, settings_poll; every main loop pass */
+/* pe_poll, Setup LED every 100 ms, settings_poll; every main loop pass.
+ * The settings save (a flash page erase that stalls the device) also waits
+ * until no note sounds and, on the play page, no grid pad was pressed or
+ * released for SETTINGS_SAVE_QUIET_MS. */
 void ui_poll(uint32_t now);
 const struct settings *ui_settings(void);
 /* Invalid or identical settings: no change. Otherwise release every note,
