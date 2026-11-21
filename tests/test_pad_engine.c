@@ -307,6 +307,42 @@ static void test_release_all(void)
     CHECK_EQ(io_log[4].kind, 'N');
 }
 
+static void test_release_all_held_and_capturing_same_pitch(void)
+{
+    uint8_t first, second;
+    int k;
+
+    /* one HELD and one CAPTURING pad on the same pitch: exactly one Note
+     * Off, whichever slot comes first (pad 11 is slot 56, pad 14 slot 59) */
+    for (k = 0; k < 2; k++) {
+        first = k ? 11 : 14;
+        second = k ? 14 : 11;
+        setup();
+        set_adcmax(first, 679);
+        set_adcmax(second, 679);
+        pe_press(first, 60, 0, 1, 0);
+        pe_poll(PEAK_WINDOW_MS);
+        CHECK_EQ(io_n, 2);
+        pe_press(second, 60, 0, 1, 4);
+        pe_poll(5);
+        pe_release_all();
+        CHECK_EQ(io_n, 4);
+        CHECK_EQ(io_log[2].kind, 'F');
+        CHECK_EQ(io_log[2].port, USBSTANDALONE);
+        CHECK_EQ(io_log[3].kind, 'F');
+        CHECK_EQ(io_log[3].port, DINMIDI);
+        CHECK_EQ(io_log[3].note, 60);
+        CHECK_EQ(rec_n, 2);
+        CHECK_EQ(pe_notes_active(), 0);
+        pe_poll(10);
+        pe_release(first, 11);
+        pe_release(second, 12);
+        pe_poll(20);
+        CHECK_EQ(io_n, 4);
+        CHECK_EQ(rec_n, 2);
+    }
+}
+
 static void test_setup_entry_during_capture_sends_nothing(void)
 {
     setup();
@@ -369,6 +405,7 @@ void test_pad_engine_all(void)
     RUN(test_latched_pitch_survives_remap);
     RUN(test_din_mirror);
     RUN(test_release_all);
+    RUN(test_release_all_held_and_capturing_same_pitch);
     RUN(test_setup_entry_during_capture_sends_nothing);
     RUN(test_peak_window_across_ms_wrap);
     RUN(test_pitch_minus1_ignored);
