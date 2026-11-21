@@ -1,5 +1,7 @@
 #include "test.h"
 #include "pads/pad_velocity.h"
+#include "instrument/settings.h"
+#include "app_defs.h"
 
 /* ADC_Max slot order, from the vendor library's surface_pad_velocitycallback
  * table (c_surface.o .rodata+0x50): slot 0..7 = pads 81..88, slot 8..15 =
@@ -86,6 +88,61 @@ static void test_velocity16_bad_calibration(void)
     CHECK_EQ(pad_velocity16(100, 256, 300), 1);
 }
 
+static void test_raw_index_inverts_adc_map(void)
+{
+    for (int i = 0; i < 64; i++)
+        CHECK_EQ(pad_raw_index(ADC_MAP[i]), i);
+    CHECK_EQ(pad_raw_index(10), PAD_NO_SLOT);
+    CHECK_EQ(pad_raw_index(99), PAD_NO_SLOT);
+}
+
+static void test_curve_endpoints(void)
+{
+    for (int c = CURVE_SOFT; c <= CURVE_HARD; c++) {
+        CHECK(pad_curve(1, (uint8_t)c) >= 1);
+        CHECK_EQ(pad_curve(65535, (uint8_t)c), 65535);
+    }
+}
+
+static void test_curve_shape(void)
+{
+    CHECK(pad_curve(32768, CURVE_SOFT) > 40000);
+    CHECK_EQ(pad_curve(32768, CURVE_LINEAR), 32768);
+    CHECK(pad_curve(32768, CURVE_HARD) < 20000);
+    for (int c = CURVE_SOFT; c <= CURVE_HARD; c++) {
+        unsigned prev = 0;
+        for (unsigned v = 0; v <= 65535; v += 64) {
+            unsigned r = pad_curve((uint16_t)v, (uint8_t)c);
+            CHECK(r >= prev);
+            prev = r;
+        }
+    }
+}
+
+static void test_pressure12_thresholds(void)
+{
+    CHECK_EQ(pad_pressure12(2048, THRESH_MED), 0);
+    CHECK_EQ(pad_pressure12(3076, THRESH_MED), 4095);
+    CHECK(pad_pressure12(2048, THRESH_LOW) > 0);
+    CHECK_EQ(pad_pressure12(2304, THRESH_HIGH), 0);
+    for (int t = THRESH_LOW; t <= THRESH_HIGH; t++) {
+        unsigned prev = 0;
+        for (unsigned r = 0; r <= 4095; r++) {
+            unsigned p = pad_pressure12((uint16_t)r, (uint8_t)t);
+            CHECK(p >= prev);
+            CHECK(p <= 4095);
+            prev = p;
+        }
+    }
+}
+
+static void test_pressure32_endpoints(void)
+{
+    CHECK_EQ(pad_pressure32(0), 0u);
+    CHECK_EQ(pad_pressure32(4095), 0xFFFFFFFFu);
+    CHECK_EQ(pad_pressure32(2048), 0x80080080u);
+}
+
 void test_pad_velocity_all(void)
 {
     RUN(test_pad_to_adcmax_slot);
@@ -94,4 +151,9 @@ void test_pad_velocity_all(void)
     RUN(test_velocity16_range);
     RUN(test_velocity16_monotonic_and_fine);
     RUN(test_velocity16_bad_calibration);
+    RUN(test_raw_index_inverts_adc_map);
+    RUN(test_curve_endpoints);
+    RUN(test_curve_shape);
+    RUN(test_pressure12_thresholds);
+    RUN(test_pressure32_endpoints);
 }

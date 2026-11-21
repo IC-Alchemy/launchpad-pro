@@ -26,4 +26,25 @@ uint8_t pad_to_adcmax_slot(uint8_t pad);
  * (set at boot by pad_setcalibration(256, 1023, 512, 769)). */
 uint16_t pad_velocity16(uint16_t adc_max, uint16_t threshold, uint16_t full_scale);
 
+/* Raw 12-bit adc_buffer index (ADC_MAP order, app_defs.h) for a grid pad
+ * index (11..88), or PAD_NO_SLOT. The inverse of ADC_MAP. */
+uint8_t pad_raw_index(uint8_t pad);
+
+/* Velocity curve on a 16-bit value; curve is CURVE_* from
+ * instrument/settings.h. Result is >= 1. */
+uint16_t pad_curve(uint16_t v, uint8_t curve);
+
+/* Pressure range in raw 12-bit ADC counts: full scale and the start point
+ * for each threshold setting. */
+#define PRESSURE_FULL_RAW  3076
+#define PRESSURE_START_LOW  1792
+#define PRESSURE_START_MED  2048
+#define PRESSURE_START_HIGH 2304
+
+/* Normalise a raw 12-bit reading to 0..4095; threshold is THRESH_*. */
+uint16_t pad_pressure12(uint16_t raw12, uint8_t threshold);
+
+/* Replicate 12 bits across 32 for MIDI 2.0: (p<<20)|(p<<8)|(p>>4). */
+uint32_t pad_pressure32(uint16_t p12);
+
 #endif
