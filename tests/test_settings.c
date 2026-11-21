@@ -74,6 +74,7 @@ static void load_bad(const uint8_t *rec)
 	memset(&s, 0x55, sizeof s);
 	settings_load(&s);
 	CHECK(same(&s, &d));
+	CHECK_EQ(io_flash_writes, 0);
 }
 
 static void test_corrupt_record_loads_defaults(void)
@@ -123,8 +124,11 @@ static void test_unchanged_or_reverted_skips_write(void)
 	io_stub_reset();
 	settings_load(&s);
 	s.scale = 3;
+	settings_touch(100);
+	settings_poll(&s, 1000, 0);
+	CHECK_EQ(io_flash_writes, 0);
 	s.scale = 0;
-	settings_touch(10);
+	settings_touch(1200);
 	settings_poll(&s, 10000, 0);
 	CHECK_EQ(io_flash_writes, 0);
 }

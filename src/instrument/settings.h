@@ -24,6 +24,12 @@ void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
 uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *s);
 /* flash offset 0; defaults on failure; remembers the result as "saved" */
 void settings_load(struct settings *s);
+/* Caller contract: every change to a settings field must be followed by
+ * settings_touch(now). settings_poll debounces from the last touch, which
+ * starts at 0 after settings_load, so an untouched change could be written
+ * as soon as now >= SETTINGS_SAVE_QUIET_MS.
+ * Known limit: io_flash_write returns no status, so a write is assumed to
+ * succeed and the saved copy is updated; there is no retry. */
 /* a change happened now */
 void settings_touch(uint32_t now);
 void settings_poll(const struct settings *cur, uint32_t now, uint8_t notes_active);

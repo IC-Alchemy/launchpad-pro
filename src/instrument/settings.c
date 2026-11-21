@@ -120,6 +120,7 @@ void settings_poll(const struct settings *cur, uint32_t now, uint8_t notes_activ
 	if (memcmp(a, b, FIELDS) == 0)
 		return;
 	settings_encode(cur, rec);
+	/* io_flash_write has no status: assume success, no retry. */
 	io_flash_write(0, rec, SETTINGS_RECORD_LEN);
 	g_saved = *cur;
 }

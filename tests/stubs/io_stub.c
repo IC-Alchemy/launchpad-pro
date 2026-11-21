@@ -1,5 +1,6 @@
 #include "stubs/io_stub.h"
 #include "instrument/io.h"
+#include "app_defs.h"
 #include <string.h>
 
 struct io_ev io_log[256];
@@ -71,9 +72,9 @@ void io_led(uint8_t type, uint8_t index, uint8_t r, uint8_t g, uint8_t b)
 {
 	uint8_t *d;
 
-	if (type == 1)
+	if (type == TYPESETUP)
 		d = io_setup_led;
-	else if (type == 0 && index < 100)
+	else if (type == TYPEPAD && index < 100)
 		d = io_leds[index];
 	else
 		return;
