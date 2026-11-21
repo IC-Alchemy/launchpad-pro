@@ -43,3 +43,16 @@ void midi2_debug_pause_rx(u8 paused)
 {
 	printf("...midi2_debug_pause_rx(%d);\n", paused);
 }
+
+static void (*main_loop_hook)(void);
+
+void midi2_set_main_loop_hook(void (*hook)(void))
+{
+	main_loop_hook = hook;
+}
+
+void sim_run_main_loop_hook(void)
+{
+	if (main_loop_hook)
+		main_loop_hook();
+}

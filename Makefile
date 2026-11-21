@@ -5,7 +5,7 @@ TOOLS = tools
 SOURCES += src/app.c
 
 # firmware-only sources (USB MIDI 2.0 transport); not part of the simulator
-FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c)
+FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c src/scales/*.c src/instrument/*.c)
 
 INCLUDES += -Iinclude -Isrc -I
 

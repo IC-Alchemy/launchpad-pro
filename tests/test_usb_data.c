@@ -225,6 +225,23 @@ static void test_alt1_entry_runs_service_first(void)
 
 /* ---- EP1 IN / TX ---- */
 
+static int hook_calls;
+static void count_hook(void) { hook_calls++; }
+
+/* the app's main-loop hook runs once per poll pass, in both USB modes */
+static void test_main_loop_hook_runs_in_both_alts(void)
+{
+	hook_calls = 0;
+	midi2_set_main_loop_hook(count_hook);
+	enter_alt0(); __wrap_midi_parsers_poll();
+	CHECK_EQ(hook_calls, 1);
+	enter_alt1(); __wrap_midi_parsers_poll();
+	CHECK_EQ(hook_calls, 2);
+	midi2_set_main_loop_hook(0);
+	__wrap_midi_parsers_poll();
+	CHECK_EQ(hook_calls, 2);
+}
+
 static void test_usbmidi_poll_tx_conditions(void)
 {
 	uint32_t w[16];
@@ -707,6 +724,7 @@ void test_usb_data_all(void)
 	RUN(test_hal_send_does_not_run_service);
 	RUN(test_alt_and_active);
 	RUN(test_sounding_vs_set_alt_interrupt);
+	RUN(test_main_loop_hook_runs_in_both_alts);
 	enter_alt0();
 	ump_stream_set_protocol_hook(0);
 }
