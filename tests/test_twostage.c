@@ -12,6 +12,7 @@ typedef struct {
 
 static ts_engine g_e;
 static rec g_r;
+static u32 g_now;	/* absolute ms fed to ts_tick; one new ms per tick0 */
 
 static void note(void *ctx, u8 ch, u8 on, u16 vel)
 {
@@ -20,7 +21,7 @@ static void note(void *ctx, u8 ch, u8 on, u16 vel)
 		r->ch[r->n] = ch;
 		r->on[r->n] = on;
 		r->vel[r->n] = vel;
-		r->now[r->n] = g_e.now_ms;
+		r->now[r->n] = g_now;
 	}
 	r->n++;
 }
@@ -29,6 +30,7 @@ static void reset(void)
 {
 	ts_init(&g_e);
 	memset(&g_r, 0, sizeof g_r);
+	g_now = 0;
 }
 
 /* one frame with every pad at 0 except channel 0 = v0 */
@@ -37,7 +39,8 @@ static void tick0(u16 v0)
 	u16 f[64];
 	memset(f, 0, sizeof f);
 	f[0] = v0;
-	ts_tick(&g_e, f, note, &g_r);
+	g_now++;
+	ts_tick(&g_e, f, g_now, note, &g_r);
 }
 
 static int near(u32 a, u32 b, u32 tol)
@@ -67,11 +70,15 @@ static void test_ts_velocity_curve(void)
 
 static void test_ts_cross_interp(void)
 {
-	CHECK_EQ(ts_cross_q8(10, 0, 240, 120), 9 * 256 + 128);
-	CHECK_EQ(ts_cross_q8(10, 100, 100, 120), 2560);
-	CHECK_EQ(ts_cross_q8(10, 100, 90, 120), 2560);
-	CHECK_EQ(ts_cross_q8(10, 100, 200, 90), 9 * 256);	/* level < prev: fraction 0 */
-	CHECK_EQ(ts_cross_q8(10, 0, 100, 4000), 10 * 256);	/* fraction clamped */
+	/* (last_ms, span, prev, x, level) */
+	CHECK_EQ(ts_cross_q8(9, 1, 0, 240, 120), 9 * 256 + 128);
+	CHECK_EQ(ts_cross_q8(9, 1, 100, 100, 120), 2560);
+	CHECK_EQ(ts_cross_q8(9, 1, 100, 90, 120), 2560);
+	CHECK_EQ(ts_cross_q8(9, 1, 100, 200, 90), 9 * 256);	/* level < prev: fraction 0 */
+	CHECK_EQ(ts_cross_q8(9, 1, 0, 100, 4000), 10 * 256);	/* fraction clamped */
+	CHECK_EQ(ts_cross_q8(8, 2, 0, 240, 120), 8 * 256 + 256);	/* half of a 2 ms span */
+	CHECK_EQ(ts_cross_q8(8, 2, 100, 100, 120), 10 * 256);	/* x <= prev: end of span */
+	CHECK_EQ(ts_cross_q8(8, 2, 100, 200, 90), 8 * 256);
 }
 
 static void test_ts_primed_first_frame(void)
@@ -81,9 +88,9 @@ static void test_ts_primed_first_frame(void)
 	reset();
 	for (i = 0; i < 64; i++)
 		f[i] = 1000;
-	ts_tick(&g_e, f, note, &g_r);
+	ts_tick(&g_e, f, ++g_now, note, &g_r);
 	CHECK_EQ(g_r.n, 0);
-	ts_tick(&g_e, f, note, &g_r);
+	ts_tick(&g_e, f, ++g_now, note, &g_r);
 	CHECK_EQ(g_r.n, 0);	/* already above T1 at power-up: ignored */
 	for (i = 0; i < 64; i++)
 		CHECK_EQ(g_e.pad[i].state, TS_IDLE);
@@ -120,7 +127,7 @@ static void test_ts_slow_press_across_wrap(void)
 {
 	int i;
 	reset();
-	g_e.now_ms = (1u << 24) - 20;	/* now_ms*256 wraps 2^32 mid-ramp */
+	g_now = (1u << 24) - 20;	/* now_ms*256 wraps 2^32 mid-ramp */
 	for (i = 0; i <= 60; i++)
 		tick0((u16)(i * 10));
 	CHECK_EQ(g_r.n, 1);
@@ -214,10 +221,10 @@ static void test_ts_release_all(void)
 	u16 f[64];
 	reset();
 	memset(f, 0, sizeof f);
-	ts_tick(&g_e, f, note, &g_r);
+	ts_tick(&g_e, f, ++g_now, note, &g_r);
 	f[3] = 1000;
 	f[40] = 1000;
-	ts_tick(&g_e, f, note, &g_r);
+	ts_tick(&g_e, f, ++g_now, note, &g_r);
 	CHECK_EQ(g_r.n, 2);
 	ts_release_all(&g_e, note, &g_r);
 	CHECK_EQ(g_r.n, 4);
@@ -259,12 +266,49 @@ static void test_ts_parked_then_medium_ramp(void)
 	park_armed();
 	tick0(300);			/* fresh T1 crossing, no note yet */
 	CHECK_EQ(g_r.n, 0);
-	t1 = ts_cross_q8(g_e.now_ms, 100, 300, TS_T1);
+	t1 = ts_cross_q8(g_now - 1, 1, 100, 300, TS_T1);
 	tick0(900);
-	t2 = ts_cross_q8(g_e.now_ms, 300, 900, TS_T2);
+	t2 = ts_cross_q8(g_now - 1, 1, 300, 900, TS_T2);
 	CHECK_EQ(g_r.n, 1);
 	CHECK(g_r.vel[0] != 0x0333);
 	CHECK_EQ(g_r.vel[0], ts_velocity(t2 - t1));
+}
+
+/* samples 2 ms apart: the crossings land inside the real gap */
+static void test_ts_gap_interpolates(void)
+{
+	u16 f[64];
+	memset(f, 0, sizeof f);
+	reset();
+	ts_tick(&g_e, f, 10, note, &g_r);	/* prime */
+	f[0] = 240;
+	ts_tick(&g_e, f, 12, note, &g_r);	/* T1 (120) at half of 10..12 = 11.0 ms */
+	CHECK_EQ(g_r.n, 0);
+	CHECK_EQ(g_e.pad[0].state, TS_ARMED);
+	CHECK_EQ(g_e.pad[0].t1_q8, 11 * 256);
+	f[0] = 720;
+	g_now = 14;
+	ts_tick(&g_e, f, 14, note, &g_r);	/* T2 (480) at half of 12..14 = 13.0 ms */
+	CHECK_EQ(g_r.n, 1);
+	CHECK_EQ(g_r.on[0], 1);
+	CHECK_EQ(g_r.vel[0], ts_velocity(2 * 256));	/* dt = 2 ms */
+	CHECK_EQ(g_e.pad[0].state, TS_HELD);
+}
+
+static void test_ts_same_ms_ignored(void)
+{
+	u16 f[64];
+	memset(f, 0, sizeof f);
+	reset();
+	ts_tick(&g_e, f, 5, note, &g_r);	/* prime */
+	f[0] = 2000;
+	ts_tick(&g_e, f, 5, note, &g_r);	/* same ms: not processed */
+	CHECK_EQ(g_r.n, 0);
+	CHECK_EQ(g_e.pad[0].state, TS_IDLE);
+	CHECK_EQ(g_e.pad[0].prev, 0);		/* prev not updated */
+	ts_tick(&g_e, f, 6, note, &g_r);	/* next ms sees the crossing from prev 0 */
+	CHECK_EQ(g_r.n, 1);
+	CHECK_EQ(g_r.vel[0], 0xFFFF);
 }
 
 void test_twostage_all(void)
@@ -284,4 +328,6 @@ void test_twostage_all(void)
 	RUN(test_ts_release_all);
 	RUN(test_ts_parked_then_hard_hit);
 	RUN(test_ts_parked_then_medium_ramp);
+	RUN(test_ts_gap_interpolates);
+	RUN(test_ts_same_ms_ignored);
 }
