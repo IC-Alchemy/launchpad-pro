@@ -96,7 +96,19 @@ static void test_peak_window_uses_12bit_peak(void)
 {
     uint32_t v1, v2;
 
-    /* raw peaks 2001 and 2002 fall in one 10-bit bucket, but differ now */
+    /* raw 2000 and 2001 share one 10-bit bucket ((raw+2)>>2 = 500 for both),
+     * but differ at 12 bits */
+    CHECK_EQ((2000 + 2) >> 2, (2001 + 2) >> 2);
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 0);
+    set_raw(45, 2000);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    v1 = io_log[0].v;
+    CHECK_EQ(v1, pw_vel12(2000));
+
     setup();
     set_adcmax(45, 400);
     pe_press(45, 64, 0, 0, 0);
@@ -104,18 +116,8 @@ static void test_peak_window_uses_12bit_peak(void)
     pe_poll(1);
     pe_poll(PEAK_WINDOW_MS);
     CHECK_EQ(io_n, 1);
-    v1 = io_log[0].v;
-    CHECK_EQ(v1, pw_vel12(2001));
-
-    setup();
-    set_adcmax(45, 400);
-    pe_press(45, 64, 0, 0, 0);
-    set_raw(45, 2002);
-    pe_poll(1);
-    pe_poll(PEAK_WINDOW_MS);
-    CHECK_EQ(io_n, 1);
     v2 = io_log[0].v;
-    CHECK_EQ(v2, pw_vel12(2002));
+    CHECK_EQ(v2, pw_vel12(2001));
     CHECK(v2 > v1);
 }
 
@@ -130,6 +132,17 @@ static void test_peak_window_seeds_from_adcmax_times_4(void)
     CHECK_EQ(io_n, 1);
     CHECK_EQ(io_log[0].v, pw_vel12(679 * 4));
     CHECK_EQ(io_log[0].v, pad_velocity16(679, PadCalibration[0], PadCalibration[1]));
+}
+
+static void test_peak_window_seed_clamps_to_4095(void)
+{
+    setup();
+    set_adcmax(45, 1100); /* above the 10-bit range */
+    pe_press(45, 64, 0, 0, 0);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    CHECK_EQ(io_log[0].v, 0xFFFF); /* seed 4095 -> full scale, linear curve */
 }
 
 static void test_peak_window_release_inside_window_keeps_12bit_peak(void)
@@ -867,6 +880,7 @@ void test_pad_engine_all(void)
     RUN(test_peak_window_waits_and_takes_max);
     RUN(test_peak_window_uses_12bit_peak);
     RUN(test_peak_window_seeds_from_adcmax_times_4);
+    RUN(test_peak_window_seed_clamps_to_4095);
     RUN(test_peak_window_release_inside_window_keeps_12bit_peak);
     RUN(test_zero_latency_stays_10bit);
     RUN(test_fast_tap_inside_window);

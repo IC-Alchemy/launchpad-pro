@@ -120,7 +120,8 @@ static void test_velocity16_raw12_monotonic_and_finer(void)
     /* about 4x the 10-bit steps (688 in 336..1023) */
     CHECK(distinct > 2600);
     /* two raw values 1 apart: the 10-bit mapping cannot tell them apart */
-    CHECK(pad_velocity16_raw12(2801, 256, 1023) < pad_velocity16_raw12(2802, 256, 1023));
+    CHECK_EQ((2800 + 2) >> 2, (2801 + 2) >> 2); /* same 10-bit bucket: 700 */
+    CHECK(pad_velocity16_raw12(2800, 256, 1023) < pad_velocity16_raw12(2801, 256, 1023));
 }
 
 /* raw12 = 4 * peak10 agrees with the 10-bit mapping exactly */
