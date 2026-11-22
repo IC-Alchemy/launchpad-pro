@@ -25,19 +25,6 @@ static inline void irq_restore(uint32_t s)
 	stub_irq_depth--;
 }
 
-#elif defined(SIMULATOR)
-
-/* host simulator (tools/simulator.c): single threaded, nothing to mask */
-static inline uint32_t irq_save(void)
-{
-	return 0;
-}
-
-static inline void irq_restore(uint32_t s)
-{
-	(void)s;
-}
-
 #else
 
 static inline uint32_t irq_save(void)

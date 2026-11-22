@@ -290,8 +290,9 @@ from this tree, without the instrument, still compile and work unchanged.
 
 - Keeps the `adc_buffer` pointer from `app_init`.
 - In Two-stage mode the engine owns press and release from raw ADC; library
-  pad press and release events are ignored (library poly pressure is forwarded
-  only for pads the engine holds). Notes sounding are released before a mode
+  pad press and release events are ignored (engine-held pads get pressure from
+  the raw ADC via the pressure pass, as in every mode; app_aftertouch_event
+  does nothing). Notes sounding are released before a mode
   change.
 - Per-pad state: idle → capturing (peak-window) → held → released. A release
   inside the capture window finalizes the peak so a fast tap still produces

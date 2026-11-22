@@ -88,14 +88,18 @@ Velocity modes: Peak-window waits 3 ms after the strike and sends the peak
 from the first reading (fastest, less accurate). Fixed always sends full
 velocity. Two-stage (pad 83) does its own press detection from the raw pad
 reading and takes the velocity from how fast the pad rises between a low and a
-high threshold: a slow, gentle press is soft, a quick one loud, and it plays
-the softest touches of the four modes. It may be weaker at the loud end.
+high threshold: a slow, gentle press is soft, a quick one loud. A touch that peaks between
+raw 120 and about 452 sounds only in Two-stage (softly, after up to 80 ms);
+a brief brush below raw 120 is silent. A touch peaking between about 452 and
+480 sounds at once in Zero-latency but only after the timeout in Two-stage
+(its high threshold, 480, is above the library trigger of about 452 raw).
+It may be weaker at the loud end.
 
 ## Two-stage and the tuning logs
 
 Select it: Setup, Options page (button 96), row 8, third pad (pad 83). In
 Two-stage the note starts when the pad has risen past the high threshold (or
-after 80 ms above the low one), so expect a very light touch to stay silent
+after 80 ms above the low one), so expect a brief brush to stay silent
 and a slow press to sound a little late. The library's press threshold is also
 lowered in this image, so Zero-latency and Peak-window play softer than at
 checkpoint 2's first build. The thresholds are first guesses. I tune them from
@@ -131,6 +135,13 @@ hardware, so I need your feel for them:
 
 All of these are constants in the source and easy to change once I know what
 you feel.
+
+Two-stage defaults are untested on hardware. A held note ends only after 3
+readings below raw 80 (`TS_REL`), so a pad that rests between raw 80 and 120
+may hang its note, and a pad that rests at or above raw 120 (`TS_T1`) never
+plays in this mode. If a note hangs, opening Setup releases it. Please report
+which pads hang or stay silent in Two-stage, and include a short log with the
+pads untouched and with them resting.
 
 ## Notes on the console commands
 
@@ -293,7 +304,7 @@ Fill in "Result" and "Notes". "Expected" is what I predict.
 | 3 | Octave and root arrows | Octave 0 to 7, root wraps B to C, held notes keep pitch; top pads unlit and silent above note 127 | | |
 | 4 | Every layout, absolute root | Five layouts as named, pad 11 stays C with absolute root | | |
 | 5 | Minor Pentatonic | Only 5 pitch classes | | |
-| 6 | Velocity: peak-window, zero-latency, fixed, curves | Soft, medium, hard separate on both pads; Fixed = 0xFFFF | | |
+| 6 | Velocity: peak-window, zero-latency, two-stage, fixed, curves | Soft, medium, hard separate on both pads; Fixed = 0xFFFF | | |
 | 7 | Poly pressure smoothness | Continuous, not 128 steps | | |
 | 8 | Channel pressure and Off | Returns to 0 on release; Off sends none | | |
 | 9 | DIN mirror | Notes and pressure on DIN, 7-bit; steady hold sends only occasional pressure | | |
@@ -302,7 +313,8 @@ Fill in "Result" and "Notes". "Expected" is what I predict.
 | 12 | Menu peek | Hold shows, release closes; held pad: one Note Off when the menu opens, then nothing | | |
 | 13 | Duplicate pitches | Light together, one Note On, one Note Off | | |
 | 14 | MIDI 1.0 fallback | 7-bit velocity and pressure; steady hold sends only occasional pressure (USB and DIN) | | |
-| 15 | Feel of the velocity modes | (describe) | | |
+| 15 | Feel of the velocity modes, Two-stage included (see Two-stage and the tuning logs) | (describe) | | |
+| 16 | Tuning logs captured per mode; Two-stage hangs or silent pads reported | Logs attached | | |
 
 ## 17. What to send back
 

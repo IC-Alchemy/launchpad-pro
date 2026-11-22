@@ -23,7 +23,8 @@ uint8_t pad_to_adcmax_slot(uint8_t pad);
 /* 16-bit velocity (1..65535) from a 10-bit ADC_Max peak, using the same
  * starting point as the library's own 7-bit velocity (threshold + 80) and
  * full_scale as the top. threshold/full_scale come from PadCalibration[0]/[1]
- * (set at boot by pad_setcalibration(256, 1023, 512, 769)). */
+ * (set at boot by pad_setcalibration(256, 1023, 512, 769); app_init then
+ * overrides the threshold with PAD_LIB_THRESHOLD, 20). */
 uint16_t pad_velocity16(uint16_t adc_max, uint16_t threshold, uint16_t full_scale);
 
 /* Raw 12-bit adc_buffer index (ADC_MAP order, app_defs.h) for a grid pad

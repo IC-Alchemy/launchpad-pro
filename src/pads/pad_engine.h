@@ -63,12 +63,12 @@ void pe_release(uint8_t pad, uint32_t now);
  * pads send none. */
 void pe_poll(uint32_t now);
 
-/* (Two-stage: the engine restarts, so pads still down stay silent until
- * released and pressed again; same for pe_forget_all.)
- * Note Off for every sounding note; drops pending captures without sending
+/* Note Off for every sounding note; drops pending captures without sending
  * anything; every pad idle (a later pe_release of those pads is silent).
  * Channel pressure goes back to 0 where the last value sent wasn't 0 (as on
- * the last pe_release of a held pad). */
+ * the last pe_release of a held pad).
+ * (Two-stage: the engine restarts, so pads still down stay silent until
+ * released and pressed again; same for pe_forget_all.) */
 void pe_release_all(void);
 
 /* The USB transport changed (alternate setting or protocol) and has ended

@@ -11,7 +11,8 @@
  *          order -- use pad_to_adcmax_slot() from pads/pad_velocity.h, NOT
  *          ADC_MAP, to find a pad's slot.
  * PadCalibration: [0] trigger threshold, [1] full scale, [2]/[3] aftertouch
- *          range; set at boot by pad_setcalibration(256, 1023, 512, 769). */
+ *          range; set at boot by pad_setcalibration(256, 1023, 512, 769);
+ *          app_init then overrides [0] with PAD_LIB_THRESHOLD (20). */
 extern u16 ADC_Max[64];
 extern u16 PadCalibration[4];
 

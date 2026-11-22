@@ -311,7 +311,7 @@ void __wrap_hal_send_midi(uint8_t port, uint8_t status, uint8_t d1, uint8_t d2)
 	uint8_t words, kind = (uint8_t)(status >> 4);
 
 	if (port > USBMIDI || !alt) {
-		/* the timer ISR (pad notes) and the main loop both land here */
+		/* may be reached from interrupt context as well as the main loop; mask so pushes never interleave */
 		uint32_t s = irq_save();
 		__real_hal_send_midi(port, status, d1, d2);
 		irq_restore(s);
