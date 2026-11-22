@@ -40,15 +40,19 @@ void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding);
 
 /* VEL_*, CURVE_*, PRESS_*, THRESH_* from instrument/settings.h. Switching
  * into VEL_TWO_STAGE resets the Two-stage engine (sends nothing): pads down
- * at that moment stay silent until released and pressed again. */
+ * at that moment stay silent until released and pressed again.
+ * Precondition: call pe_release_all() before changing the velocity mode while
+ * notes are held. Leaving Two-stage stops the engine's Note Offs, and
+ * entering it makes pe_release a no-op, so a held note would be stuck. */
 void pe_configure(uint8_t velocity_mode, uint8_t curve, uint8_t pressure_mode, uint8_t threshold);
 
 /* pad: grid index 11..88. pitch -1 (or any value outside 0..127): ignored.
- * ch: 0..15. din_mirror: also send on DINMIDI. now: ms counter. */
+ * ch: 0..15. din_mirror: also send on DINMIDI. now: ms counter.
+ * In VEL_TWO_STAGE both pe_press and pe_release are ignored: the engine in
+ * pe_poll drives the notes (pe_set_target supplies pitch, channel and DIN
+ * flag). */
 void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32_t now);
 void pe_release(uint8_t pad, uint32_t now);
-/* In VEL_TWO_STAGE both are ignored: the engine in pe_poll drives the notes
- * (pe_set_target supplies pitch, channel and DIN flag). */
 
 /* Peak windows, the Two-stage engine (VEL_TWO_STAGE: once per new ms, on
  * the raw buffer) and pressure; call every main loop pass. Pressure runs on

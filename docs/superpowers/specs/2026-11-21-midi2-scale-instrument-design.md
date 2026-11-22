@@ -149,6 +149,17 @@ press event, then squeezes it to 7 bits with its own curve. So:
   Defaults (12-bit): `TS_T1 = 120`, `TS_T2 = 480`, `TS_REL = 80`,
   `TS_TIMEOUT_MS = 80`, `TS_REL_TICKS = 3`, `TS_DT_FAST = 1 ms`,
   `TS_VEL_MIN = 0x0200`; must hold `TS_REL < TS_T1 < TS_T2`.
+  The engine runs in the main loop, from the pad engine's `pe_poll`, once per
+  new millisecond (not in the timer interrupt). It is fed the absolute ms
+  counter; the main loop may skip milliseconds, so crossing times are
+  interpolated over the real gap since the previous sample (clamped to 1..255
+  ms). The pad engine supplies pitch, channel and DIN flag at the engine's Note
+  On through a target callback (`pe_set_target`; the UI returns no note while
+  the menu is open). In the settings, Two-stage is `VEL_TWO_STAGE = 3`,
+  appended after Fixed so stored records keep their meaning; the menu shows
+  the four modes in the order above and maps each column to its value.
+  Thresholds are tuned from the player's MIDI logs of the normal image
+  (Windows MIDI Services monitor export), not from a measurement build.
 
 **Library press threshold.** The library's threshold is lowered from 256 to
 `PAD_LIB_THRESHOLD = 20` (set via `pad_setcalibration` inside `app_init`). The
@@ -552,8 +563,8 @@ The player has the hardware and will test on Windows at the checkpoint.
 ## Left to the builder
 
 - Two-stage thresholds and timing (`TS_T1`, `TS_T2`, `TS_REL`,
-  `TS_TIMEOUT_MS`, `TS_REL_TICKS`) from on-device measurement; the defaults
-  above are starting values.
+  `TS_TIMEOUT_MS`, `TS_REL_TICKS`) and `PAD_LIB_THRESHOLD` from the player's
+  MIDI logs; the defaults above are starting values.
 - Exact peak-window length and baseline/normalisation, after measuring how
   often `adc_buffer` updates (if it updates faster than 1 kHz, sample faster).
 - Exact colours, the pressure hysteresis and the rate cap.
