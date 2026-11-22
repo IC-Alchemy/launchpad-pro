@@ -32,6 +32,8 @@
 
 #include <stdio.h>
 #include "app.h"
+#include "platform/pads.h"
+#include "pads/twostage.h"
 
 // ____________________________________________________________________________
 //
@@ -109,9 +111,30 @@ int main(int argc, char * argv[])
 	// let's just call a few things to give the app a very brief workout.
 	sim_app_init();
 	
-	// surface
+	// Two-stage (the default): feed raw frames for grid pad 11 (ADC channel 0)
+	// straight into app_timer_event, quiet then a ramp up past TS_T2, a hold,
+	// then release below TS_REL.  One note on, one note off.
+	printf("Two-stage: pad 11 ramp, hold, release (raw frames via app_timer_event)...\n");
+	{
+		static const u16 pad11[] = { 0, 0, 200, 700, 700, 700, 30, 30, 30, 30 };
+		for (unsigned i = 0; i < sizeof pad11 / sizeof pad11[0]; ++i)
+		{
+			raw_ADC[0] = pad11[i];
+			app_timer_event();
+		}
+	}
+	
+	// a library press event in Two-stage is ignored (grid pad 35)
 	sim_app_surface_event(TYPEPAD, 35, 127);
+	sim_app_surface_event(TYPEPAD, 35, 0);
+	
+	// Setup + pad 11 selects Zero-latency (silent), then a library press sounds
 	sim_app_surface_event(TYPESETUP, 0, 127);
+	sim_app_surface_event(TYPEPAD, 11, 100);
+	sim_app_surface_event(TYPEPAD, 11, 0);
+	sim_app_surface_event(TYPESETUP, 0, 0);
+	ADC_Max[pad_slot(35)] = 512;
+	sim_app_surface_event(TYPEPAD, 35, 127);
 	sim_app_surface_event(TYPEPAD, 35, 0);
 	
 	// MIDI

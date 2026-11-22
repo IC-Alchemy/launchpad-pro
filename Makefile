@@ -27,6 +27,7 @@ HEX = $(BUILDDIR)/launchpad_pro.hex
 HEXTOSYX = $(BUILDDIR)/hextosyx
 SIMULATOR = $(BUILDDIR)/simulator
 TEST_BIN = $(BUILDDIR)/tests/run_tests
+APP_TEST_BIN = $(BUILDDIR)/tests/run_app_tests
 
 # host unit tests: later tasks append their files to TEST_SOURCES
 TEST_SOURCES += tests/run_tests.c tests/test_harness.c
@@ -40,6 +41,9 @@ TEST_SOURCES += tests/test_usb_data.c
 TEST_SOURCES += tests/test_pads.c
 TEST_SOURCES += tests/test_padscope.c src/pads/padscope.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
+# app tests: src/app.c with recording hal stubs; separate binary because
+# tests/run_tests links the real usb_midi2.c and stubs.c, which clash with it
+APP_TEST_SOURCES = tests/test_app_modes.c tests/stubs/app_stubs.c src/app.c src/pads/twostage.c src/ump/ump_codec.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
@@ -79,7 +83,7 @@ $(HEXTOSYX): | submodules
 # build the simulator (it's a very basic test of the code before it runs on the device!)
 $(SIMULATOR): $(SIM_SOURCES) $(wildcard include/*.h src/*/*.h)
 	mkdir -p $(BUILDDIR)
-	$(HOST_GCC) -g3 -O0 -std=c99 -Iinclude -Isrc $(SIM_SOURCES) -o $(SIMULATOR)
+	$(HOST_GCC) -g3 -O0 -std=c99 -DSIMULATOR -Iinclude -Isrc $(SIM_SOURCES) -o $(SIMULATOR)
 
 $(HEX): $(ELF)
 	$(OBJCOPY) -O ihex $< $@
@@ -114,8 +118,12 @@ $(GOLDEN_DESC): lib/launchpad_pro.a
 	cd $(BUILDDIR)/tests/ar && arm-none-eabi-ar x $(CURDIR)/lib/launchpad_pro.a usb_desc.o
 	arm-none-eabi-objcopy -O binary --only-section=.rodata $(BUILDDIR)/tests/ar/usb_desc.o $@
 
-test: $(TEST_BIN)
-	./$(TEST_BIN)
+test: $(TEST_BIN) $(APP_TEST_BIN)
+	@rc=0; ./$(TEST_BIN) || rc=1; ./$(APP_TEST_BIN) || rc=1; exit $$rc
+
+$(APP_TEST_BIN): $(APP_TEST_SOURCES) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
+	mkdir -p $(dir $@)
+	$(HOST_GCC) $(TEST_CFLAGS) $(APP_TEST_SOURCES) -o $@
 
 $(TEST_BIN): $(GOLDEN_DESC) $(TEST_SOURCES) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
 	mkdir -p $(dir $@)
