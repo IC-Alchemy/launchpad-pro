@@ -34,7 +34,9 @@ struct pe_pad
         uint16_t sent[PE_DESTS];    /* PE_HELD: low 16 bits of the ms counter
                                      * at the pitch's last pressure send */
     } t;
-    uint16_t peak;      /* 10-bit velocity peak, raised while capturing */
+    uint16_t peak;      /* velocity peak, raised while capturing. Peak-window:
+                         * raw 12-bit (seeded ADC_Max * 4); Zero-latency:
+                         * the library's 10-bit ADC_Max */
     uint16_t filt;      /* PE_HELD: filtered raw 12-bit ADC value x 16 */
     uint16_t sent12;    /* PE_HELD: pitch's last 12-bit pressure on Standalone */
     uint8_t state;      /* PE_IDLE / PE_CAPTURING / PE_HELD */
@@ -92,13 +94,18 @@ static uint8_t slot_to_pad(uint8_t slot)
     return (uint8_t)((8 - slot / 8) * 10 + 1 + slot % 8);
 }
 
-static uint16_t velocity(uint16_t peak10)
+/* wide: peak is a raw 12-bit peak-window value, else a 10-bit ADC_Max */
+static uint16_t velocity(uint16_t peak, uint8_t wide)
 {
+    uint16_t v;
+
     if (g_vel_mode == VEL_FIXED)
     {
         return 0xFFFF;
     }
-    return pad_curve(pad_velocity16(peak10, PadCalibration[0], PadCalibration[1]), g_curve);
+    v = wide ? pad_velocity16_raw12(peak, PadCalibration[0], PadCalibration[1])
+             : pad_velocity16(peak, PadCalibration[0], PadCalibration[1]);
+    return pad_curve(v, g_curve);
 }
 
 /* current raw 12-bit ADC sample of a slot's pad */
@@ -114,10 +121,10 @@ static uint16_t raw(uint8_t slot)
     return v > 4095 ? 4095 : v;
 }
 
-/* raise a capturing pad's peak with the current raw sample */
+/* raise a capturing pad's 12-bit peak with the current raw sample */
 static void sample(struct pe_pad *p, uint8_t slot)
 {
-    uint16_t v = (uint16_t)((raw(slot) + 2) >> 2);
+    uint16_t v = raw(slot);
 
     if (v > p->peak)
     {
@@ -184,9 +191,9 @@ static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
 }
 
 /* capture (or zero-latency press) finished: velocity from the peak */
-static void sound(struct pe_pad *p, uint32_t now)
+static void sound(struct pe_pad *p, uint32_t now, uint8_t wide)
 {
-    sound_v(p, velocity(p->peak), now);
+    sound_v(p, velocity(p->peak, wide), now);
 }
 
 /* a held pad stops sounding its pitch */
@@ -506,11 +513,13 @@ void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32
     p->peak = ADC_Max[slot];
     if (g_vel_mode == VEL_PEAK_WINDOW)
     {
+        /* the window keeps a raw 12-bit peak: seed with the 10-bit one x4 */
+        p->peak = p->peak > 1023 ? 4095 : (uint16_t)(p->peak * 4);
         p->state = PE_CAPTURING;
     }
     else
     {
-        sound(p, now);
+        sound(p, now, 0);
     }
 }
 
@@ -528,7 +537,7 @@ void pe_release(uint8_t pad, uint32_t now)
     {
         /* released inside the window: finish the capture now */
         sample(p, slot);
-        sound(p, now);
+        sound(p, now, 1);
     }
     if (p->state == PE_HELD)
     {
@@ -552,7 +561,7 @@ void pe_poll(uint32_t now)
         sample(p, slot);
         if ((uint32_t)(now - p->t.press) >= PEAK_WINDOW_MS)
         {
-            sound(p, now);
+            sound(p, now, 1);
         }
     }
 

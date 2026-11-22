@@ -83,15 +83,18 @@ Options page (button 96), all white:
 | 2 | 21 to 28 | MIDI channel 1 to 8 |
 | 1 | 11 to 18 | MIDI channel 9 to 16 |
 
-Velocity modes: Peak-window waits 3 ms after the strike and sends the peak
-(the most accurate, at 3 ms latency). Zero-latency sends the Note On at once
+Velocity modes: Peak-window waits 3 ms after the strike and sends the highest
+raw 12-bit reading in that window (the most accurate, full sensor resolution,
+at 3 ms latency). Zero-latency sends the Note On at once
 from the first reading (fastest, less accurate). Fixed always sends full
 velocity. Two-stage (pad 83) does its own press detection from the raw pad
 reading and takes the velocity from how fast the pad rises between a low and a
-high threshold: a slow, gentle press is soft, a quick one loud. A touch that peaks between
-raw 120 and about 452 sounds only in Two-stage (softly, after up to 80 ms);
-a brief brush below raw 120 is silent. A touch peaking between about 452 and
-480 sounds at once in Zero-latency but only after the timeout in Two-stage
+high threshold: a slow, gentle press is soft, a quick one loud. In Two-stage, after the
+timeout a touch sounds only if it rises above raw 120 and stays at or above 120
+for 80 ms; a short tap that never reaches 480 and falls back is silent. A touch
+that peaks between raw 120 and about 452 and is held sounds only in Two-stage
+(softly, after up to 80 ms); a brief brush below raw 120 is silent. A touch peaking between about 452 and
+480 sounds at once in Zero-latency but, if held, only after the timeout in Two-stage
 (its high threshold, 480, is above the library trigger of about 452 raw).
 It may be weaker at the loud end.
 

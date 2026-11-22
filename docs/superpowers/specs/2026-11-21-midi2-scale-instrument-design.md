@@ -122,10 +122,13 @@ press event, then squeezes it to 7 bits with its own curve. So:
   earlier "interpolate within the 7-bit bucket" idea, which turned out to be
   meaningless once the library's own peak capture was found.)
 - *Peak-window* (default): send nothing at the press event. Keep sampling that
-  pad's raw ADC for a short window afterwards (default 2 ms, tunable constant)
-  and use the highest of `ADC_Max` and the window peak. This catches presses
-  that keep rising after the library's trigger point (slow or "pushed"
-  strikes), giving the most even response. Adds about 2 ms of note-on latency.
+  pad's raw 12-bit ADC for a short window afterwards (at least 2 ms; the
+  constant is 3 ms at 1 ms tick resolution) and use the highest raw 12-bit
+  reading in the window, seeded with `ADC_Max` x 4, mapped to velocity with the
+  same start and end points scaled by 4. This keeps the true sensor resolution
+  (no reduction to 10 bits) and catches presses that keep rising after the
+  library's trigger point (slow or "pushed" strikes), giving the most even
+  response. Adds about 2 ms of note-on latency.
 - In every mode the menu curve is applied to the 16-bit velocity. MIDI 1.0 output
   uses the same shaped value, scaled as described in section 3. The Fixed
   setting sends full velocity.

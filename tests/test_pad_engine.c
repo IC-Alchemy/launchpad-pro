@@ -86,6 +86,76 @@ static void test_peak_window_waits_and_takes_max(void)
     CHECK_EQ(io_n, 1);
 }
 
+/* the peak-window velocity for a 12-bit peak, with the default calibration */
+static uint16_t pw_vel12(uint16_t raw12)
+{
+    return pad_curve(pad_velocity16_raw12(raw12, PadCalibration[0], PadCalibration[1]), CURVE_LINEAR);
+}
+
+static void test_peak_window_uses_12bit_peak(void)
+{
+    uint32_t v1, v2;
+
+    /* raw peaks 2001 and 2002 fall in one 10-bit bucket, but differ now */
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 0);
+    set_raw(45, 2001);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    v1 = io_log[0].v;
+    CHECK_EQ(v1, pw_vel12(2001));
+
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 0);
+    set_raw(45, 2002);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    v2 = io_log[0].v;
+    CHECK_EQ(v2, pw_vel12(2002));
+    CHECK(v2 > v1);
+}
+
+static void test_peak_window_seeds_from_adcmax_times_4(void)
+{
+    setup();
+    set_adcmax(45, 679);
+    set_raw(45, 100); /* never exceeds the seed */
+    pe_press(45, 64, 0, 0, 0);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    CHECK_EQ(io_log[0].v, pw_vel12(679 * 4));
+    CHECK_EQ(io_log[0].v, pad_velocity16(679, PadCalibration[0], PadCalibration[1]));
+}
+
+static void test_peak_window_release_inside_window_keeps_12bit_peak(void)
+{
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 10);
+    set_raw(45, 2002);
+    pe_release(45, 11);
+    CHECK_EQ(io_n, 2);
+    CHECK_EQ(io_log[0].kind, 'N');
+    CHECK_EQ(io_log[0].v, pw_vel12(2002));
+    CHECK_EQ(io_log[1].kind, 'F');
+}
+
+static void test_zero_latency_stays_10bit(void)
+{
+    setup();
+    zero_latency();
+    set_adcmax(45, 679);
+    set_raw(45, 4000); /* the raw buffer is ignored at the press */
+    pe_press(45, 64, 0, 0, 0);
+    CHECK_EQ(io_n, 1);
+    CHECK_EQ(io_log[0].v, pad_velocity16(679, PadCalibration[0], PadCalibration[1]));
+}
+
 static void test_fast_tap_inside_window(void)
 {
     setup();
@@ -795,6 +865,10 @@ void test_pad_engine_all(void)
 {
     RUN(test_zero_latency_note_on_at_press);
     RUN(test_peak_window_waits_and_takes_max);
+    RUN(test_peak_window_uses_12bit_peak);
+    RUN(test_peak_window_seeds_from_adcmax_times_4);
+    RUN(test_peak_window_release_inside_window_keeps_12bit_peak);
+    RUN(test_zero_latency_stays_10bit);
     RUN(test_fast_tap_inside_window);
     RUN(test_retrigger_within_window);
     RUN(test_fixed_velocity);
