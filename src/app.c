@@ -128,7 +128,17 @@ static void note_off(u8 index)
 {
     g_held[index] = 0;
     g_vel[index] = 0;
-    set_pad_led(index, 0);
+#ifndef PADSCOPE
+    if (g_setup_held && (index == MODE_PAD_ZERO || index == MODE_PAD_TWOSTAGE))
+    {
+        // keep the mode indicator lit
+        show_mode_leds();
+    }
+    else
+#endif
+    {
+        set_pad_led(index, 0);
+    }
     hal_send_note_off2(USBSTANDALONE, 0, index, 0);
 }
 
@@ -187,9 +197,8 @@ static void set_vel_mode(u8 mode)
         // fresh engine: a pad already down does not start a note
         ts_init(&g_ts);
     }
-    irq_restore(s);
-    
     show_mode_leds();
+    irq_restore(s);
 }
 #endif
 
@@ -228,6 +237,11 @@ void app_surface_event(u8 type, u8 index, u8 value)
                     {
                         set_vel_mode(VEL_TWO_STAGE);
                     }
+                }
+                else if (g_held[index])
+                {
+                    // a note sounding before Setup still gets its Off
+                    note_off(index);
                 }
                 break;
             }
@@ -269,15 +283,20 @@ void app_surface_event(u8 type, u8 index, u8 value)
             midi2_debug_pause_rx(value ? 1 : 0);
             
             // held: pads 11/12 pick the velocity mode, released: back to off
-            g_setup_held = value ? 1 : 0;
-            if (value)
             {
-                show_mode_leds();
-            }
-            else
-            {
-                restore_pad_led(MODE_PAD_ZERO);
-                restore_pad_led(MODE_PAD_TWOSTAGE);
+                // the timer interrupt plots LEDs too: keep pad 11/12 writes whole
+                u32 s = irq_save();
+                g_setup_held = value ? 1 : 0;
+                if (value)
+                {
+                    show_mode_leds();
+                }
+                else
+                {
+                    restore_pad_led(MODE_PAD_ZERO);
+                    restore_pad_led(MODE_PAD_TWOSTAGE);
+                }
+                irq_restore(s);
             }
 #endif
         }
