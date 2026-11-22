@@ -17,6 +17,7 @@ void test_usb_prop_all(void);
 void test_usb_data_all(void);
 void test_pads_all(void);
 void test_padscope_all(void);
+void test_twostage_all(void);
 
 int main(void)
 {
@@ -30,6 +31,7 @@ int main(void)
 	test_usb_data_all();
 	test_pads_all();
 	test_padscope_all();
+	test_twostage_all();
 
 	printf("%d failures\n", test_failures());
 	return test_failures() ? 1 : 0;
