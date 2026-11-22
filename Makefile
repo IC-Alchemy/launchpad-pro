@@ -5,7 +5,7 @@ TOOLS = tools
 SOURCES += src/app.c
 
 # firmware-only sources (USB MIDI 2.0 transport); not part of the simulator
-FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c)
+FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c)
 
 INCLUDES += -Iinclude -Isrc -I
 
@@ -18,7 +18,7 @@ LIB_WORK = $(BUILDDIR)/lib_trim
 OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES))))
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
-SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c
+SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c $(wildcard src/pads/*.c)
 
 # output files
 SYX = $(BUILDDIR)/launchpad_pro.syx
@@ -38,6 +38,7 @@ TEST_SOURCES += tests/test_usb_desc.c src/usb/usb_desc.c
 TEST_SOURCES += tests/test_usb_prop.c src/usb/usb_prop.c src/usb/usb_midi2.c src/usb/usb_endp.c
 TEST_SOURCES += tests/test_usb_data.c
 TEST_SOURCES += tests/test_pads.c
+TEST_SOURCES += tests/test_padscope.c src/pads/padscope.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
@@ -54,7 +55,7 @@ CFLAGS  = -Os -Wall -I.\
 -D_STM32F103RBT6_  -D_STM3x_  -D_STM32x_ -mthumb -mcpu=cortex-m3 \
 -fsigned-char  -DSTM32F10X_MD -DUSE_STDPERIPH_DRIVER -DHSE_VALUE=6000000UL \
 -DCMSIS -DUSE_GLOBAL_CONFIG -ffunction-sections -std=c99  -mlittle-endian \
-$(INCLUDES) -o
+$(if $(PADSCOPE),-DPADSCOPE) $(INCLUDES) -o
 
 LDSCRIPT = stm32_flash.ld
 

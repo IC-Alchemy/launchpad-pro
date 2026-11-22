@@ -39,6 +39,9 @@
 #include "midi2.h"
 #include "ump/ump.h"
 #include "platform/pads.h"
+#ifdef PADSCOPE
+#include "pads/padscope.h"
+#endif
 
 //______________________________________________________________________________
 //
@@ -125,8 +128,16 @@ void app_surface_event(u8 type, u8 index, u8 value)
             
         case TYPESETUP:
         {
+#ifdef PADSCOPE
+            // measurement build: Setup press dumps the idle stats
+            if (value)
+            {
+                padscope_dump();
+            }
+#else
             // held: stop draining received UMP, released: resume
             midi2_debug_pause_rx(value ? 1 : 0);
+#endif
         }
         break;
     }
@@ -189,6 +200,11 @@ void app_timer_event()
         // send a clock pulse up the USB
         hal_send_midi(USBSTANDALONE, MIDITIMINGCLOCK, 0, 0);
     }
+    
+#ifdef PADSCOPE
+    // g_ADC is null until app_init has run
+    padscope_tick(g_ADC);
+#endif
     
     if (++led_ms >= SETUP_LED_MS)
     {
