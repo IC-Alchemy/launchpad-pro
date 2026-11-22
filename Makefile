@@ -105,6 +105,16 @@ DEPENDS := $(OBJECTS:.o=.d)
 
 -include $(DEPENDS)
 
+# PADSCOPE stamp: rewritten only when the value changes, so switching
+# PADSCOPE=1 <-> default rebuilds the firmware objects without a make clean
+PADSCOPE_FLAG = $(BUILDDIR)/padscope.flag
+.PHONY: force
+$(PADSCOPE_FLAG): force
+	@mkdir -p $(BUILDDIR)
+	@echo "PADSCOPE=$(PADSCOPE)" | cmp -s - $@ || echo "PADSCOPE=$(PADSCOPE)" > $@
+
+$(OBJECTS): $(PADSCOPE_FLAG)
+
 $(BUILDDIR)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) -c $(CFLAGS) -MMD -o $@ $<

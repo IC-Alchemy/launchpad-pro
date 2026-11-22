@@ -371,11 +371,14 @@ void app_timer_event()
     padscope_tick(g_ADC);
 #endif
     
+#ifndef PADSCOPE
+    // the measurement image sends no notes (untuned constants)
     // g_ADC is null until app_init has run
     if (g_vel_mode == VEL_TWO_STAGE && g_ADC)
     {
         ts_tick(&g_ts, g_ADC, on_ts_note, 0);
     }
+#endif
     
     if (++led_ms >= SETUP_LED_MS)
     {

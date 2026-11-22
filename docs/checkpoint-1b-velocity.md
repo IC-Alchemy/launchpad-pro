@@ -16,9 +16,9 @@ Firmware files are not stored in the repository. The builder sends you the
 
 Same as section 1 of `docs/checkpoint-1-transport.md`: unplug, hold Setup
 while plugging in USB, send the `.syx` file to the bootloader, wait for the
-unit to reboot. The builder must run `make clean` before switching between
-the `PADSCOPE=1` image and the default image, because the define does not
-trigger a rebuild of objects already built.
+unit to reboot. The Makefile tracks the `PADSCOPE` value and rebuilds the firmware objects
+when it changes, so switching between the `PADSCOPE=1` image and the default
+image needs no `make clean` (running it is harmless).
 
 ## What the measurement build does (round 1)
 
@@ -35,6 +35,8 @@ trigger a rebuild of objects already built.
   since the last dump (only readings below 400 count), also two SysEx
   messages. The statistics restart after each dump.
 - The SysEx framing is `F0 00 20 29 7D <type> <part> <payload> F7`.
+- The PADSCOPE image sends no notes at all: the pads are silent and the only
+  output is the SysEx dumps (and the Setup LED/clock traffic of the transport).
 - In this build Setup does nothing else (no mode switch, no RX pause).
 
 A strike that stays below 200 raw is not captured. If a feather-light strike
@@ -108,7 +110,7 @@ padscope data are 12-bit raw (0 to 4095); `PAD_LIB_THRESHOLD` is 10-bit.
 
 ## Round 2: feel test (default image, tuned constants)
 
-Flash the default image the builder sends (after `make clean`). Setup LED:
+Flash the default image the builder sends . Setup LED:
 green = MIDI 2.0 active. Open a MIDI monitor on the Standalone port that shows
 the raw 16-bit velocity values.
 

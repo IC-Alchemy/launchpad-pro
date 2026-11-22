@@ -122,6 +122,9 @@ Start the monitor on the Launchpad endpoint, for example
 endpoint id or name from step 3). Then hit pad 11 softly, medium and hard,
 several times each, releasing each time.
 
+On images from checkpoint 1b on, first hold Setup and press pad 11
+(Zero-latency); the velocity expectations below hold only in that mode.
+
 Expected, to verify:
 
 - each hit gives a Note On with a 16-bit velocity (not only multiples of 512

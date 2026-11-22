@@ -123,7 +123,7 @@ press event, then squeezes it to 7 bits with its own curve. So:
   and use the highest of `ADC_Max` and the window peak. This catches presses
   that keep rising after the library's trigger point (slow or "pushed"
   strikes), giving the most even response. Adds about 2 ms of note-on latency.
-- In every mode the menu curve is applied to the raw peak. MIDI 1.0 output
+- In every mode the menu curve is applied to the 16-bit velocity. MIDI 1.0 output
   uses the same shaped value, scaled as described in section 3. The Fixed
   setting sends full velocity.
   *(Builder's call; if reading `ADC_Max` proves unreliable on the device,
