@@ -8,6 +8,8 @@ static u16 g_len[MAXMSG];
 static int g_n;
 static int g_calls_this_tick;
 static int g_max_per_tick;
+static int g_gap_min;		/* fewest ticks seen between two messages */
+static int g_since;
 
 void hal_send_sysex(u8 port, const u8 *data, u16 len)
 {
@@ -16,6 +18,9 @@ void hal_send_sysex(u8 port, const u8 *data, u16 len)
 		memcpy(g_msg[g_n], data, len);
 		g_len[g_n] = len;
 	}
+	if (g_n > 0 && g_since < g_gap_min)
+		g_gap_min = g_since;
+	g_since = 0;
 	g_n++;
 	g_calls_this_tick++;
 }
@@ -25,14 +30,23 @@ static void reset(void)
 	padscope_test_reset();
 	g_n = 0;
 	g_max_per_tick = 0;
+	g_gap_min = 1000000;
+	g_since = 0;
 }
 
 static void tick(const u16 *f)
 {
 	g_calls_this_tick = 0;
+	g_since++;
 	padscope_tick(f);
 	if (g_calls_this_tick > g_max_per_tick)
 		g_max_per_tick = g_calls_this_tick;
+}
+
+static void ticks(const u16 *f, int n)
+{
+	while (n-- > 0)
+		tick(f);
 }
 
 static u16 unpack(const u8 *p)
@@ -114,9 +128,18 @@ static void test_capture_dump_paced(void)
 	f[40]++;
 	tick(f);			/* 50th tick below 100 */
 	CHECK_EQ(g_n, 1);
-	tick(f);
+	for (k = 0; k < PADSCOPE_MSG_GAP_TICKS - 1; k++) {
+		f[40]++;
+		tick(f);
+	}
+	CHECK_EQ(g_n, 1);		/* part 1 held back for the gap */
+	for (k = 0; k < 3 && g_n < 2; k++) {
+		f[40]++;
+		tick(f);
+	}
 	CHECK_EQ(g_n, 2);
-	for (k = 0; k < 5; k++)
+	CHECK(g_gap_min >= PADSCOPE_MSG_GAP_TICKS);
+	for (k = 0; k < 30; k++)
 		tick(f);
 	CHECK_EQ(g_n, 2);
 	CHECK_EQ(g_max_per_tick, 1);
@@ -146,8 +169,6 @@ static void test_capture_dump_paced(void)
 static void test_idle_dump(void)
 {
 	u16 f[64];
-	int k;
-
 	reset();
 	memset(f, 0, sizeof f);
 	f[3] = 30;
@@ -162,9 +183,11 @@ static void test_idle_dump(void)
 	CHECK_EQ(g_n, 0);		/* only a request */
 	tick(f);
 	CHECK_EQ(g_n, 1);
-	tick(f);
+	ticks(f, PADSCOPE_MSG_GAP_TICKS - 1);
+	CHECK_EQ(g_n, 1);
+	ticks(f, 2);
 	CHECK_EQ(g_n, 2);
-	tick(f);
+	ticks(f, 30);
 	CHECK_EQ(g_n, 2);
 	CHECK_EQ(g_max_per_tick, 1);
 	CHECK_EQ(g_msg[0][5], 2);
@@ -180,11 +203,50 @@ static void test_idle_dump(void)
 	f[3] = 55;
 	tick(f);
 	padscope_dump();
-	for (k = 0; k < 3; k++)
-		tick(f);
+	ticks(f, 2 * PADSCOPE_MSG_GAP_TICKS + 4);
 	CHECK_EQ(g_n, 4);
 	CHECK_EQ(unpack(g_msg[2] + 7 + 2 * 3), 55);
 	CHECK_EQ(unpack(g_msg[3] + 7 + 2 * 3), 55);
+}
+
+static void test_settle_timeout(void)
+{
+	u16 f[64];
+	int k;
+
+	reset();
+	memset(f, 0, sizeof f);
+	tick(f);
+	f[0] = 4000;			/* pad goes down and stays down */
+	for (k = 0; k < 130; k++) {
+		f[40]++;
+		tick(f);
+	}
+	CHECK_EQ(padscope_test_state(), 2);
+	for (k = 0; k < 900; k++) {
+		f[40]++;
+		tick(f);
+	}
+	CHECK_EQ(g_n, 0);
+	for (k = 0; k < 100 && g_n == 0; k++) {
+		f[40]++;
+		tick(f);
+	}
+	CHECK_EQ(g_n, 1);		/* sent anyway, so new captures can start */
+}
+
+static void test_dump_during_send_kept(void)
+{
+	u16 f[64];
+
+	reset();
+	memset(f, 0, sizeof f);
+	tick(f);
+	padscope_dump();
+	tick(f);			/* part 0 out, dump in progress */
+	padscope_dump();		/* second press while sending */
+	ticks(f, 4 * PADSCOPE_MSG_GAP_TICKS);
+	CHECK_EQ(g_n, 4);		/* both dumps went out */
 }
 
 static void test_null_frame(void)
@@ -201,5 +263,7 @@ void test_padscope_all(void)
 	RUN(test_stale_count);
 	RUN(test_capture_dump_paced);
 	RUN(test_idle_dump);
+	RUN(test_settle_timeout);
+	RUN(test_dump_during_send_kept);
 	RUN(test_null_frame);
 }

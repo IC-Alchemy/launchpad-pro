@@ -13,7 +13,10 @@
  *                      part 1: 64 max values packed
  * Samples: index 0..7 are the 8 samples before the trigger (t = -8..-1 ms),
  * index 8..127 the 120 from the trigger sample on (t = 0..119 ms).
- * At most one message is sent per padscope_tick. */
+ * At most one message is sent per padscope_tick, and consecutive messages are
+ * at least PADSCOPE_MSG_GAP_TICKS ticks apart so the UMP queue can drain. */
+
+#define PADSCOPE_MSG_GAP_TICKS 20
 
 #include "app.h"
 

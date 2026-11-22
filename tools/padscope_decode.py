@@ -53,7 +53,7 @@ def messages(text):
 def main():
     pending = {}
     for m in messages(sys.stdin.read()):
-        if len(m) < 5 or m[:3] != b"\x00\x20\x29" or m[3] != 0x7D:
+        if len(m) < 6 or m[:3] != b"\x00\x20\x29" or m[3] != 0x7D:
             sys.stderr.write("warning: not a padscope message, skipped\n")
             continue
         typ, part, payload = m[4], m[5], m[6:]

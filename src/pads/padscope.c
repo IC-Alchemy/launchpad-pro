@@ -10,6 +10,7 @@
 #define IDLE_LEVEL 400
 #define STALE_MAX 0x3FFF
 #define MSG_MAX 272
+#define SETTLE_MAX_TICKS 1000	/* give up waiting for the pad to release */
 
 enum { CAP_IDLE, CAP_RECORD, CAP_SETTLE, CAP_READY };
 enum { SEND_NONE, SEND_CAPTURE, SEND_IDLE };
@@ -33,11 +34,16 @@ static u16 g_samp;				/* samples recorded so far */
 static u16 g_cap_pad[PADSCOPE_SAMPLES];
 static u16 g_cap_nb[PADSCOPE_SAMPLES];
 static u16 g_cap_stale;				/* snapshot sent in the message */
+static u16 g_settle;				/* ticks spent in CAP_SETTLE */
 static u8 g_low;				/* consecutive ticks below RELEASE_LEVEL */
 
 static u8 g_send;
 static u8 g_part;
-static volatile u8 g_idle_req;
+static u8 g_gap = PADSCOPE_MSG_GAP_TICKS;	/* ticks since the last message */
+/* dump requests: the main loop increments g_dump_req, the tick copies it to
+ * g_dump_ack when it starts a dump, so a press is never lost */
+static volatile u8 g_dump_req;
+static u8 g_dump_ack;
 static u8 g_msg[MSG_MAX];
 
 u16 padscope_pack12(const u16 *vals, u8 count, u8 *out)
@@ -132,7 +138,7 @@ static void capture_step(const u16 *raw)
 		const u16 *prev = g_ring[(u8)((g_ring_head + PADSCOPE_PRE - 1) % PADSCOPE_PRE)];
 
 		/* a dump being requested or sent also holds back a new capture */
-		if (!g_have_prev || g_idle_req || g_send != SEND_NONE)
+		if (!g_have_prev || g_dump_req != g_dump_ack || g_send != SEND_NONE)
 			return;
 		for (c = 0; c < PAD_COUNT; c++) {
 			if (prev[c] < TRIGGER_LEVEL && raw[c] >= TRIGGER_LEVEL) {
@@ -148,12 +154,15 @@ static void capture_step(const u16 *raw)
 		if (++g_samp >= PADSCOPE_SAMPLES) {
 			g_cap_state = CAP_SETTLE;
 			g_low = 0;
+			g_settle = 0;
 		}
 		return;
 	}
 	if (g_cap_state == CAP_SETTLE) {
 		g_low = raw[g_chan] < RELEASE_LEVEL ? (u8)(g_low + 1) : 0;
-		if (g_low >= RELEASE_TICKS) {
+		/* bounded: a pad held down or a high baseline must not block
+		 * captures for ever */
+		if (g_low >= RELEASE_TICKS || ++g_settle >= SETTLE_MAX_TICKS) {
 			g_cap_stale = g_stale;
 			g_stale = 0;
 			g_cap_state = CAP_READY;
@@ -180,17 +189,22 @@ static void send_step(void)
 {
 	u16 n;
 
+	if (g_gap < PADSCOPE_MSG_GAP_TICKS) {
+		g_gap++;
+		return;
+	}
 	if (g_send == SEND_NONE) {
 		if (g_cap_state == CAP_READY) {
 			g_send = SEND_CAPTURE;
-		} else if (g_idle_req) {
+		} else if (g_dump_req != g_dump_ack) {
 			g_send = SEND_IDLE;
-			g_idle_req = 0;
+			g_dump_ack = g_dump_req;
 		} else {
 			return;
 		}
 		g_part = 0;
 	}
+	g_gap = 0;
 	if (g_send == SEND_CAPTURE) {
 		if (g_part == 0) {
 			g_msg[7] = ADC_MAP[g_chan];
@@ -265,7 +279,7 @@ void padscope_tick(const u16 *raw)
 
 void padscope_dump(void)
 {
-	g_idle_req = 1;
+	g_dump_req++;
 }
 
 #ifdef HOST_TEST
@@ -282,7 +296,9 @@ void padscope_test_reset(void)
 	g_stale = 0;
 	g_cap_state = CAP_IDLE;
 	g_send = SEND_NONE;
-	g_idle_req = 0;
+	g_dump_ack = g_dump_req;
+	g_gap = PADSCOPE_MSG_GAP_TICKS;
+	g_settle = 0;
 	g_samp = 0;
 	g_low = 0;
 }
