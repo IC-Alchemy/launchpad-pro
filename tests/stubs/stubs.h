@@ -56,6 +56,8 @@ struct stub_state {
 	int real_usbmidi_poll_irq_depth;	/* stub_irq_depth at the last call */
 	int real_flush_calls;
 	int real_midi_calls;
+	int real_midi_irq_depth;	/* stub_irq_depth at the last real send */
+	int real_sysex_irq_depth;
 	uint8_t real_midi_last[4];	/* port, status, d1, d2 */
 	int real_sysex_calls;
 	uint8_t real_sysex_port;

@@ -316,6 +316,7 @@ void __real_midi_flush_windows_buffer(void)
 void __real_hal_send_midi(uint8_t port, uint8_t status, uint8_t d1, uint8_t d2)
 {
 	stub.real_midi_calls++;
+	stub.real_midi_irq_depth = stub_irq_depth;
 	stub.real_midi_last[0] = port;
 	stub.real_midi_last[1] = status;
 	stub.real_midi_last[2] = d1;
@@ -325,6 +326,7 @@ void __real_hal_send_midi(uint8_t port, uint8_t status, uint8_t d1, uint8_t d2)
 void __real_hal_send_sysex(uint8_t port, const uint8_t *data, uint16_t len)
 {
 	stub.real_sysex_calls++;
+	stub.real_sysex_irq_depth = stub_irq_depth;
 	stub.real_sysex_port = port;
 	stub.real_sysex_data = data;
 	stub.real_sysex_len = len;
