@@ -76,10 +76,16 @@ static void step(ts_engine *e, u8 ch, u16 x, ts_note_fn fn, void *ctx)
 		}
 		break;
 	case TS_ARMED:
-		/* x in [TS_REL, TS_T1): keep waiting, accepted behaviour */
+		/* x in [TS_REL, TS_T1): keep waiting, accepted behaviour. A pad
+		 * parked there and then rising through T1 again starts a fresh
+		 * ramp, so t1 is re-stamped on every upward T1 crossing. */
 		if (x < TS_REL) {
 			p->state = TS_IDLE;
-		} else if (x >= TS_T2) {
+			break;
+		}
+		if (prev < TS_T1 && x >= TS_T1)
+			p->t1_q8 = ts_cross_q8(e->now_ms, prev, x, TS_T1);
+		if (x >= TS_T2) {
 			u32 t2 = ts_cross_q8(e->now_ms, prev, x, TS_T2);
 			p->state = TS_HELD;
 			p->low_count = 0;

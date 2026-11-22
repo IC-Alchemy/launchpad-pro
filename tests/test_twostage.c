@@ -231,6 +231,42 @@ static void test_ts_release_all(void)
 	CHECK_EQ(g_r.n, 4);
 }
 
+/* a pad parked ARMED in [TS_REL, TS_T1) must not keep its stale t1 */
+static void park_armed(void)
+{
+	int i;
+	reset();
+	tick0(0);
+	tick0(150);			/* crosses T1, ARMED */
+	CHECK_EQ(g_e.pad[0].state, TS_ARMED);
+	for (i = 0; i < 200; i++)
+		tick0(100);		/* settles in [REL, T1) for 200 ms */
+	CHECK_EQ(g_e.pad[0].state, TS_ARMED);
+	CHECK_EQ(g_r.n, 0);
+}
+
+static void test_ts_parked_then_hard_hit(void)
+{
+	park_armed();
+	tick0(2000);
+	CHECK_EQ(g_r.n, 1);
+	CHECK_EQ(g_r.vel[0], 0xFFFF);
+}
+
+static void test_ts_parked_then_medium_ramp(void)
+{
+	u32 t1, t2;
+	park_armed();
+	tick0(300);			/* fresh T1 crossing, no note yet */
+	CHECK_EQ(g_r.n, 0);
+	t1 = ts_cross_q8(g_e.now_ms, 100, 300, TS_T1);
+	tick0(900);
+	t2 = ts_cross_q8(g_e.now_ms, 300, 900, TS_T2);
+	CHECK_EQ(g_r.n, 1);
+	CHECK(g_r.vel[0] != 0x0333);
+	CHECK_EQ(g_r.vel[0], ts_velocity(t2 - t1));
+}
+
 void test_twostage_all(void)
 {
 	RUN(test_ts_velocity_curve);
@@ -246,4 +282,6 @@ void test_twostage_all(void)
 	RUN(test_ts_flat_step_no_div0);
 	RUN(test_ts_retrigger_needs_release);
 	RUN(test_ts_release_all);
+	RUN(test_ts_parked_then_hard_hit);
+	RUN(test_ts_parked_then_medium_ramp);
 }
