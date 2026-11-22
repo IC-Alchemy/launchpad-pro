@@ -203,6 +203,9 @@ void app_init(const u16 *adc_raw)
 {
     // store off the raw ADC frame pointer for later use
     g_ADC = adc_raw;
+
+    // lower the library press threshold (main passed 256) so soft hits report
+    pad_setcalibration(PAD_LIB_THRESHOLD, 0x3ff, 0x200, 0x301);
     
     update_setup_led();
 }

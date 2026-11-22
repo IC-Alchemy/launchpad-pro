@@ -41,9 +41,21 @@ static void test_peak_to_velocity(void)
 	CHECK_EQ(pad_peak_to_velocity(0xFFFF), 0xFFFF);
 }
 
+static void test_lib_levels(void)
+{
+	CHECK_EQ(pad_lib_trigger_level(256), 358);
+	CHECK_EQ(pad_lib_trigger_level(20), 113);
+	CHECK_EQ(pad_lib_trigger_level(0), 92);
+	CHECK_EQ(pad_lib_release_level(20), 103);
+	CHECK_EQ(pad_lib_release_level(0), 96);
+	CHECK(pad_lib_release_level(PAD_LIB_THRESHOLD) < pad_lib_trigger_level(PAD_LIB_THRESHOLD));
+	CHECK(pad_lib_release_level(0) >= pad_lib_trigger_level(0));   /* why floor is 20 */
+}
+
 void test_pads_all(void)
 {
 	RUN(test_slot_matches_library_table);
 	RUN(test_slot_rejects_non_grid);
 	RUN(test_peak_to_velocity);
+	RUN(test_lib_levels);
 }
