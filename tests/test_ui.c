@@ -263,6 +263,39 @@ static void test_scale_page_select(void)
 	CHECK_EQ(ui_menu_open(), 1);
 }
 
+static void test_velocity_row_columns(void)
+{
+	static const uint8_t col_val[4] = {VEL_PEAK_WINDOW, VEL_ZERO_LATENCY,
+	                                   VEL_TWO_STAGE, VEL_FIXED};
+	int c, k;
+
+	setup();
+	setup_tap(T0);
+	tap(96, T0 + 100);
+	for (c = 0; c < 4; c++) {
+		tap((uint8_t)(81 + c), T0 + 110 + c);
+		CHECK_EQ(ui_settings()->velocity_mode, col_val[c]);
+		for (k = 0; k < 4; k++) {
+			if (k == c)
+				CHECK(led_is((uint8_t)(81 + k), 63, 63, 63));
+			else
+				CHECK(led_is((uint8_t)(81 + k), 6, 6, 6));
+		}
+	}
+	/* unused columns do nothing */
+	tap(85, T0 + 200);
+	CHECK_EQ(ui_settings()->velocity_mode, VEL_FIXED);
+	CHECK(led_is(85, 0, 0, 0));
+	/* other rows stay 3 columns */
+	tap(74, T0 + 210);
+	CHECK_EQ(ui_settings()->velocity_curve, CURVE_LINEAR);
+	CHECK(led_is(74, 0, 0, 0));
+	tap(64, T0 + 220);
+	CHECK_EQ(ui_settings()->pressure_mode, PRESS_POLY);
+	tap(54, T0 + 230);
+	CHECK_EQ(ui_settings()->pressure_threshold, THRESH_MED);
+}
+
 static void test_options_page_select(void)
 {
 	setup();
@@ -518,6 +551,7 @@ void test_ui_all(void)
 	RUN(test_setup_peek);
 	RUN(test_menu_entry_releases_notes);
 	RUN(test_menu_drawing);
+	RUN(test_velocity_row_columns);
 	RUN(test_scale_page_select);
 	RUN(test_options_page_select);
 	RUN(test_menu_reopens_on_last_page);

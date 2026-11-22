@@ -138,9 +138,16 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 		}
 	} else {
 		it->kind = K_OPTION;
-		if (r >= 5 && c < 3) {
-			uint8_t *rows[4] = {&g_s.pressure_threshold, &g_s.pressure_mode,
-			                    &g_s.velocity_curve, &g_s.velocity_mode};
+		if (r == 8 && c < 4) {
+			/* menu order: Peak-window, Zero-latency, Two-stage, Fixed */
+			static const uint8_t VEL_AT[4] = {VEL_PEAK_WINDOW, VEL_ZERO_LATENCY,
+			                                  VEL_TWO_STAGE, VEL_FIXED};
+
+			it->field = &g_s.velocity_mode;
+			it->value = VEL_AT[c];
+		} else if (r >= 5 && r < 8 && c < 3) {
+			uint8_t *rows[3] = {&g_s.pressure_threshold, &g_s.pressure_mode,
+			                    &g_s.velocity_curve};
 			it->field = rows[r - 5];
 			it->value = c;
 		} else if (r == 4 && c < 2) {
