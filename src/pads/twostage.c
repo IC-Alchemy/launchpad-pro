@@ -1,5 +1,8 @@
 #include "pads/twostage.h"
 
+/* Q8 times are modulo 2^32; the mask keeps that true where u32 is wider (host tests) */
+#define M32(v) ((u32)(v) & 0xFFFFFFFFu)
+
 /* thresholds must be ordered; a negative array size fails the build otherwise */
 typedef char ts_order_check[(TS_REL < TS_T1 && TS_T1 < TS_T2) ? 1 : -1];
 
@@ -29,10 +32,10 @@ u16 ts_velocity(u32 dt_q8)
 
 u32 ts_cross_q8(u32 now_ms, u16 prev, u16 x, u16 level)
 {
-	u32 base = now_ms ? (now_ms - 1) * 256 : 0;
+	u32 base = M32((now_ms - 1) * 256);
 	u32 frac;
 	if (x <= prev)
-		return now_ms * 256;
+		return M32(now_ms * 256);
 	if (level <= prev) {
 		frac = 0;
 	} else {
@@ -40,19 +43,20 @@ u32 ts_cross_q8(u32 now_ms, u16 prev, u16 x, u16 level)
 		if (frac > 256)
 			frac = 256;
 	}
-	return base + frac;
+	return M32(base + frac);
 }
 
 static u16 vel_between(u32 t1_q8, u32 t2_q8)
 {
-	return ts_velocity(t2_q8 > t1_q8 ? t2_q8 - t1_q8 : 0);
+	u32 d = M32(t2_q8 - t1_q8);	/* modular: survives the now_ms*256 wrap */
+	return ts_velocity(d > 0x80000000u ? 0 : d);
 }
 
 static void step(ts_engine *e, u8 ch, u16 x, ts_note_fn fn, void *ctx)
 {
 	ts_pad *p = &e->pad[ch];
 	u16 prev = p->prev;
-	u32 now_q8 = e->now_ms * 256;
+	u32 now_q8 = M32(e->now_ms * 256);
 
 	switch (p->state) {
 	case TS_IDLE:
@@ -72,6 +76,7 @@ static void step(ts_engine *e, u8 ch, u16 x, ts_note_fn fn, void *ctx)
 		}
 		break;
 	case TS_ARMED:
+		/* x in [TS_REL, TS_T1): keep waiting, accepted behaviour */
 		if (x < TS_REL) {
 			p->state = TS_IDLE;
 		} else if (x >= TS_T2) {
@@ -79,7 +84,7 @@ static void step(ts_engine *e, u8 ch, u16 x, ts_note_fn fn, void *ctx)
 			p->state = TS_HELD;
 			p->low_count = 0;
 			fn(ctx, ch, 1, vel_between(p->t1_q8, t2));
-		} else if (x >= TS_T1 && now_q8 - p->t1_q8 >= (u32)TS_TIMEOUT_MS * 256) {
+		} else if (x >= TS_T1 && M32(now_q8 - p->t1_q8) >= (u32)TS_TIMEOUT_MS * 256) {
 			p->state = TS_HELD;
 			p->low_count = 0;
 			fn(ctx, ch, 1, ts_velocity((u32)TS_TIMEOUT_MS * 256));

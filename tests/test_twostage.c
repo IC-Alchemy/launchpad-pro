@@ -116,6 +116,18 @@ static void test_ts_slow_press(void)
 	CHECK_EQ(g_e.pad[0].state, TS_HELD);
 }
 
+static void test_ts_slow_press_across_wrap(void)
+{
+	int i;
+	reset();
+	g_e.now_ms = (1u << 24) - 20;	/* now_ms*256 wraps 2^32 mid-ramp */
+	for (i = 0; i <= 60; i++)
+		tick0((u16)(i * 10));
+	CHECK_EQ(g_r.n, 1);
+	CHECK(near(g_r.vel[0], ts_velocity(36 * 256), 1));
+	CHECK(g_r.now[0] > (1u << 24));	/* T2 landed after the wrap */
+}
+
 static void test_ts_single_tick_hard_hit(void)
 {
 	reset();
@@ -226,6 +238,7 @@ void test_twostage_all(void)
 	RUN(test_ts_primed_first_frame);
 	RUN(test_ts_power_up_held_rearms);
 	RUN(test_ts_slow_press);
+	RUN(test_ts_slow_press_across_wrap);
 	RUN(test_ts_single_tick_hard_hit);
 	RUN(test_ts_timeout_gentle);
 	RUN(test_ts_brush_silent);
