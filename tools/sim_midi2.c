@@ -7,6 +7,7 @@
 #include "platform/pads.h"
 
 u16 ADC_Max[64];
+u16 PadCalibration[4] = {256, 1023, 512, 769};
 
 u8 midi2_active(void)
 {
@@ -41,4 +42,17 @@ void hal_send_channel_pressure2(u8 port, u8 ch, u32 value)
 void midi2_debug_pause_rx(u8 paused)
 {
 	printf("...midi2_debug_pause_rx(%d);\n", paused);
+}
+
+static void (*main_loop_hook)(void);
+
+void midi2_set_main_loop_hook(void (*hook)(void))
+{
+	main_loop_hook = hook;
+}
+
+void sim_run_main_loop_hook(void)
+{
+	if (main_loop_hook)
+		main_loop_hook();
 }
