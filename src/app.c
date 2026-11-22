@@ -37,98 +37,60 @@
 
 #include "app.h"
 #include "midi2.h"
-#include "ump/ump.h"
-#include "platform/pads.h"
+#include "instrument/ui.h"
+#include "pads/pad_engine.h"
 
 //______________________________________________________________________________
 //
-// Stage 1 checkpoint app.  Pads send MIDI 2.0 notes with 16-bit velocity on
-// the Standalone port, the USB "MIDI" port is bridged to the DIN port, and the
-// Setup LED shows the USB MIDI state:
-//   green  - MIDI 2.0 active (alt 1, MIDI 2.0 Protocol)
-//   amber  - alt 1 but MIDI 1.0 Protocol
-//   red    - alt 0 (USB MIDI 1.0)
-// Holding Setup pauses UMP receive (RX drain) for the backpressure test.
+// Stage 2 scale instrument.  Pads, menus and LEDs live in instrument/ui.c, the
+// notes and pressure in pads/pad_engine.c.  This file only routes events, keeps
+// the millisecond counter and bridges the USB "MIDI" port to the DIN port.
 //______________________________________________________________________________
 
-#define PAD_INDEXES 100
+// millisecond counter, advanced by the timer event
+static volatile uint32_t g_ms = 0;
 
-// store ADC frame pointer
-static const u16 *g_ADC = 0;
+// the USB alternate setting and protocol last seen
+static u8 g_usb_alt;
+static u8 g_usb_midi2;
 
-// 16-bit velocity of each held pad (0 = not held by us)
-static u16 g_vel[PAD_INDEXES];
-static u8 g_held[PAD_INDEXES];
-
-//______________________________________________________________________________
-
-static void set_pad_led(u8 index, u8 level)
+// The transport ends every Standalone note itself when the alternate setting
+// or protocol changes; the pad engine must forget them too.  Checked before
+// each pad event as well, so a press in the same main-loop pass as the change
+// is not forgotten after it has sounded on the new transport.
+static void check_transport(void)
 {
-    hal_plot_led(TYPEPAD, index, level, level, level);
+    u8 a = midi2_usb_alt();
+    u8 m = midi2_active();
+
+    if (a != g_usb_alt || m != g_usb_midi2)
+    {
+        g_usb_alt = a;
+        g_usb_midi2 = m;
+        ui_transport_changed(g_ms);
+    }
 }
 
-static void update_setup_led(void)
+static void main_loop(void)
 {
-    if (midi2_active())
-    {
-        hal_plot_led(TYPESETUP, 0, 0, MAXLED, 0);   // green
-    }
-    else if (midi2_usb_alt() == 1)
-    {
-        hal_plot_led(TYPESETUP, 0, MAXLED, 20, 0);  // amber
-    }
-    else
-    {
-        hal_plot_led(TYPESETUP, 0, MAXLED, 0, 0);   // red
-    }
+    check_transport();
+    ui_poll(g_ms);
 }
 
 //______________________________________________________________________________
 
 void app_surface_event(u8 type, u8 index, u8 value)
 {
+    check_transport();
     switch (type)
     {
         case TYPEPAD:
-        {
-            if (index >= PAD_INDEXES)
-            {
-                break;
-            }
-            
-            if (value)
-            {
-                // ADC_Max is indexed by library pad slot and still holds the
-                // peak that triggered this press (see platform/pads.h)
-                u8 slot = pad_slot(index);
-                u16 v = 0;
-                
-                if (slot != PAD_NO_SLOT)
-                {
-                    v = pad_peak_to_velocity(ADC_Max[slot]);
-                }
-                
-                g_vel[index] = v;
-                g_held[index] = 1;
-                set_pad_led(index, (u8)(v >> 10));
-                hal_send_note_on2(USBSTANDALONE, 0, index, v);
-            }
-            else if (g_held[index])
-            {
-                g_held[index] = 0;
-                g_vel[index] = 0;
-                set_pad_led(index, 0);
-                hal_send_note_off2(USBSTANDALONE, 0, index, 0);
-            }
-        }
-        break;
-            
+            ui_pad(index, value, g_ms);
+            break;
+
         case TYPESETUP:
-        {
-            // held: stop draining received UMP, released: resume
-            midi2_debug_pause_rx(value ? 1 : 0);
-        }
-        break;
+            ui_setup(value, g_ms);
+            break;
     }
 }
 
@@ -159,50 +121,29 @@ void app_sysex_event(u8 port, u8 * data, u16 count)
 
 void app_aftertouch_event(u8 index, u8 value)
 {
-    // poly pressure on the Standalone port, with the pad notes (32-bit and
-    // coalesced in MIDI 2.0, 7-bit otherwise)
-    hal_send_poly_pressure2(USBSTANDALONE, 0, index, ump_scale_up(value, 7, 32));
+    // nothing: pressure comes from the raw ADC in the pad engine
 }
 
 //______________________________________________________________________________
 
 void app_cable_event(u8 type, u8 value)
 {
-    // the Setup LED shows the USB MIDI state instead (see app_timer_event)
 }
 
 //______________________________________________________________________________
 
 void app_timer_event()
 {
-    // send MIDI clock at 125bpm
-#define TICK_MS 20
-#define SETUP_LED_MS 100
-    
-    static u8 ms = TICK_MS;
-    static u8 led_ms = SETUP_LED_MS;
-    
-    if (++ms >= TICK_MS)
-    {
-        ms = 0;
-        
-        // send a clock pulse up the USB
-        hal_send_midi(USBSTANDALONE, MIDITIMINGCLOCK, 0, 0);
-    }
-    
-    if (++led_ms >= SETUP_LED_MS)
-    {
-        led_ms = 0;
-        update_setup_led();
-    }
+    g_ms++;
 }
 
 //______________________________________________________________________________
 
 void app_init(const u16 *adc_raw)
 {
-    // store off the raw ADC frame pointer for later use
-    g_ADC = adc_raw;
-    
-    update_setup_led();
+    g_usb_alt = midi2_usb_alt();
+    g_usb_midi2 = midi2_active();
+    pe_init(adc_raw, ui_on_sounding);
+    ui_init(g_ms);
+    midi2_set_main_loop_hook(main_loop);
 }

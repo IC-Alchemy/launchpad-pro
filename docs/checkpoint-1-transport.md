@@ -11,9 +11,9 @@ repository.
 ## What the test app does
 
 - Pad press: a MIDI 2.0 Note On on the Standalone port (UMP group 0), channel
-  1, note number = pad index (pad 11 = note 11), with a 16-bit velocity scaled
-  up from the library's 10-bit pad pressure peak (`ADC_Max`). Pad release:
-  Note Off.
+  1, note number = pad index (pad 11 = note 11), with a 16-bit velocity from the
+  pad's 10-bit hit peak, spread over the same range the stock 7-bit velocity
+  uses (trigger point → full scale). Pad release: Note Off.
 - The pad lights while held, brighter for harder hits. Pad pressure while
   held is sent as Poly Pressure on the Standalone port (32-bit in the MIDI 2.0
   Protocol).
@@ -124,14 +124,13 @@ several times each, releasing each time.
 
 Expected, to verify:
 
-- each hit gives a Note On with a 16-bit velocity (not only multiples of 512
-  as would come from 7-bit scaling), with soft hits low and hard hits high.
-  The softest hit that triggers a note gives about 0x5400 (the library only
-  reports a press once the 10-bit peak passes about 336), not a value near 0.
-  Below 0x8000 the values step by 64 (the pad peak is 10 bits); above it the
-  steps are 64 or 65. Hard hits reach 0xFFFF. (The first stage 1 image read
-  the wrong pad's peak and gave 0x0010 to 0x0050 for every hit; if you see
-  values like that, you are on the old image);
+- each hit gives a Note On with a 16-bit velocity that follows how hard you
+  hit, not which pad you hit: soft hits low, hard hits high, on every pad.
+  Repeat the soft/medium/hard test on a second pad (e.g. pad 88) — the ranges
+  should be similar. The softest hit that triggers a note is near the bottom
+  (as low as 0x0001); a full-force hit reaches or approaches 0xFFFF. Values
+  step by about 95 (the pad peak has 687 usable steps), so you should see many
+  distinct values, not only multiples of 512 as 7-bit scaling would give;
 - each release gives a Note Off;
 - the pad lights, brighter for harder hits;
 - MIDI clock arrives on group 0 about every 20 ms.

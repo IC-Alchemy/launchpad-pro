@@ -114,7 +114,10 @@ per-pad peak (`ADC_Max`, 64 × u16, a linkable global) before it raises the
 press event, then squeezes it to 7 bits with its own curve. So:
 
 - *Zero-latency*: on the library's press event, read that pad's `ADC_Max`
-  peak (12-bit) at once and turn it into 16-bit velocity. Full sensor
+  peak at once and turn it into 16-bit velocity. (Corrected after the stage-1
+  hardware test: `ADC_Max` is 10-bit, `(raw + 2) >> 2`, and is stored in the
+  library's own slot order, not `ADC_MAP` order: slot = (8 − row)·8 + (col − 1).
+  See `src/pads/pad_velocity.h`.) Full sensor
   resolution, no added delay beyond today's firmware. (Revised from the
   earlier "interpolate within the 7-bit bucket" idea, which turned out to be
   meaningless once the library's own peak capture was found.)

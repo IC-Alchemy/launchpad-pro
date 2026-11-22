@@ -85,7 +85,6 @@ struct cx_fifo1k {
 };
 cx_fifo1k MIDIToHst, MIDIDinOut;
 uint8_t DinRx[24], USBParserToDev[24];
-uint16_t ADC_Max[64];
 
 void stub_rx_packet(const uint8_t *p, uint16_t n)
 {

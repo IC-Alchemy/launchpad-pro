@@ -5,7 +5,7 @@ TOOLS = tools
 SOURCES += src/app.c
 
 # firmware-only sources (USB MIDI 2.0 transport); not part of the simulator
-FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c)
+FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c src/scales/*.c src/instrument/*.c)
 
 INCLUDES += -Iinclude -Isrc -I
 
@@ -18,7 +18,8 @@ LIB_WORK = $(BUILDDIR)/lib_trim
 OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES))))
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
-SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c
+SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
+	src/scales/scales.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c
 
 # output files
 SYX = $(BUILDDIR)/launchpad_pro.syx
@@ -37,7 +38,12 @@ TEST_SOURCES += tests/test_ump_rx.c src/ump/ump_rx.c
 TEST_SOURCES += tests/test_usb_desc.c src/usb/usb_desc.c
 TEST_SOURCES += tests/test_usb_prop.c src/usb/usb_prop.c src/usb/usb_midi2.c src/usb/usb_endp.c
 TEST_SOURCES += tests/test_usb_data.c
-TEST_SOURCES += tests/test_pads.c
+TEST_SOURCES += tests/test_pad_velocity.c src/pads/pad_velocity.c
+TEST_SOURCES += tests/test_scales.c src/scales/scales.c
+TEST_SOURCES += tests/test_settings.c src/instrument/settings.c tests/stubs/io_stub.c
+TEST_SOURCES += tests/test_pad_engine.c src/pads/pad_engine.c
+TEST_SOURCES += tests/test_pressure.c
+TEST_SOURCES += tests/test_ui.c src/instrument/ui.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
