@@ -32,8 +32,8 @@ pressure natively, and Windows now has an in-box USB MIDI 2.0 driver.
    degree / out-of-scale).
 5. A settings menu on the device, opened from the Setup button, with a Scale
    page and an Options page. Settings persist across power cycles.
-6. Both velocity algorithms are available and selectable in the menu:
-   **Peak-window** and **Zero-latency** (definitions below).
+6. Three velocity algorithms are available and selectable in the menu:
+   **Peak-window**, **Zero-latency** and **Two-stage** (definitions below).
 7. Existing open-firmware apps keep working: `include/app.h` and its ABI are
    not changed; `hal_send_midi` / `hal_send_sysex` / `app_midi_event` /
    `app_sysex_event` keep working in both USB modes.
@@ -107,7 +107,7 @@ pressure natively, and Windows now has an in-box USB MIDI 2.0 driver.
   1.0 with 14-bit CC/NRPN tricks (doesn't meet the goal); replacing the whole
   USB stack (needless risk).
 
-**Velocity (both kept; selectable).**
+**Velocity (all three kept; selectable).**
 
 Finding that shaped this: the library's `cx_pad.o` already captures a running
 per-pad peak (`ADC_Max`, 64 × u16, a linkable global) before it raises the
@@ -129,7 +129,34 @@ press event, then squeezes it to 7 bits with its own curve. So:
   *(Builder's call; if reading `ADC_Max` proves unreliable on the device,
   Zero-latency falls back to the raw `adc_buffer` reading at the press event.)*
 
-The player chose: implement both, selectable in the menu.
+- *Two-stage*: the app does its own press detection from the raw 12-bit
+  `adc_buffer`, and velocity is the time the reading takes to rise from a low
+  threshold T1 to a high threshold T2. Crossing times are interpolated
+  linearly between samples (Q8 ms). Velocity is
+  `0xFFFF * TS_DT_FAST / dt`, floored at `TS_VEL_MIN` (7-bit value 1), so
+  short time is loud, long time soft, with most resolution at the soft end.
+  Per pad: `TS_IDLE`, `TS_ARMED` (T1 crossed), `TS_HELD`. ARMED reaching T2
+  sends Note On. ARMED for `TS_TIMEOUT_MS` while still above T1 sends Note On
+  with the timeout's velocity (a very slow gentle press still sounds). ARMED
+  falling below `TS_REL` is a brush: silent, back to idle. HELD sends Note Off
+  after `TS_REL_TICKS` consecutive samples below `TS_REL`, so noise near
+  `TS_REL` does not flicker. A hard hit crossing both thresholds in one tick
+  gives one Note On. Aim is the softest playing; it may be weaker at the loud
+  end, which the player accepts.
+  Defaults (12-bit): `TS_T1 = 120`, `TS_T2 = 480`, `TS_REL = 80`,
+  `TS_TIMEOUT_MS = 80`, `TS_REL_TICKS = 3`, `TS_DT_FAST = 1 ms`,
+  `TS_VEL_MIN = 0x0200`; must hold `TS_REL < TS_T1 < TS_T2`.
+
+**Library press threshold.** The library's threshold is lowered from 256 to
+`PAD_LIB_THRESHOLD = 20` (set via `pad_setcalibration` inside `app_init`). The
+softest library-reported press drops from about 35% to about 11% of the 10-bit
+range (trigger about `1.04 * t + 92`). Below about 20 the press and release
+levels overlap and the pad chatters, so it goes no lower. Side effect: the
+library fires the press at once for peaks of 507 or more, so Zero-latency
+reads some loud hits mid-rise.
+
+The player chose: implement all three, selectable in the menu. Each has its
+own feel and quirks.
 
 **Structure (builder's call).** The MIDI 2.0 layer (`src/usb`, `src/ump`,
 `include/midi2.h`) is a reusable platform underneath `app.h`. The scale
@@ -248,6 +275,10 @@ from this tree, without the instrument, still compile and work unchanged.
 ### 3. Pad engine (`src/pads/`)
 
 - Keeps the `adc_buffer` pointer from `app_init`.
+- In Two-stage mode the engine owns press and release from raw ADC; library
+  pad press and release events are ignored (library poly pressure is forwarded
+  only for pads the engine holds). Notes sounding are released before a mode
+  change.
 - Per-pad state: idle → capturing (peak-window) → held → released. A release
   inside the capture window finalizes the peak so a fast tap still produces
   an attack followed by a release. Latch the output destination, channel
@@ -339,7 +370,7 @@ button is lit.
 
 *Options page* (one option per row, one pad per value, selected value
 bright):
-- Row 1: velocity mode — Peak-window / Zero-latency / Fixed.
+- Row 1: velocity mode — Peak-window / Zero-latency / Two-stage / Fixed.
 - Row 2: velocity curve — Soft / Linear / Hard.
 - Row 3: pressure mode — Poly / Channel / Off.
 - Row 4: pressure threshold — Low / Med / High.
@@ -448,7 +479,7 @@ scales and options from the PC.
     into `X-ScaleList`), `octave` 0–7, `layout` (enum string), and
     `absoluteRoot` (bool).
   - `X-PlayOptions` (Get / Set / Subscribe): `velocityMode`
-    (`peakWindow`/`zeroLatency`/`fixed`), `velocityCurve`
+    (`peakWindow`/`zeroLatency`/`twoStage`/`fixed`), `velocityCurve`
     (`soft`/`linear`/`hard`), `pressureMode` (`poly`/`channel`/`off`),
     `pressureThreshold` (`low`/`med`/`high`), `dinMirror` (bool), and
     `channel` (1–16).
@@ -517,6 +548,9 @@ The player has the hardware and will test on Windows at the checkpoint.
 
 ## Left to the builder
 
+- Two-stage thresholds and timing (`TS_T1`, `TS_T2`, `TS_REL`,
+  `TS_TIMEOUT_MS`, `TS_REL_TICKS`) from on-device measurement; the defaults
+  above are starting values.
 - Exact peak-window length and baseline/normalisation, after measuring how
   often `adc_buffer` updates (if it updates faster than 1 kHz, sample faster).
 - Exact colours, the pressure hysteresis and the rate cap.

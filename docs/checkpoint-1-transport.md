@@ -126,8 +126,11 @@ Expected, to verify:
 
 - each hit gives a Note On with a 16-bit velocity (not only multiples of 512
   as would come from 7-bit scaling), with soft hits low and hard hits high.
-  The softest hit that triggers a note gives about 0x5400 (the library only
-  reports a press once the 10-bit peak passes about 336), not a value near 0.
+  With the stock threshold (256) the softest hit that triggers a note has
+  `ADC_Max` about 358 (10-bit), giving about 0x5980 (the library only reports
+  a press once the 10-bit peak passes about 358), not a value near 0. The
+  lower `PAD_LIB_THRESHOLD = 20` brings that trigger to about 113, about
+  0x1C40, so softest hits read lower than this on a newer image.
   Below 0x8000 the values step by 64 (the pad peak is 10 bits); above it the
   steps are 64 or 65. Hard hits reach 0xFFFF. (The first stage 1 image read
   the wrong pad's peak and gave 0x0010 to 0x0050 for every hit; if you see
