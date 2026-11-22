@@ -24,20 +24,34 @@
  * same 0 -> 1 and 1 -> 0 edges that send the Note On and Note Off. */
 typedef void (*pe_sounding_fn)(uint8_t pitch, uint8_t sounding);
 
+/* Two-stage mode: the engine (pads/twostage.h) decides when a pad starts and
+ * stops and how hard; this callback supplies what to play. Called at the
+ * engine's Note On for a pad (grid index 11..88): fill *ch (0..15) and
+ * *din_mirror and return the pitch, or -1 (or any value outside 0..127) for
+ * no note (no Note On, and no Note Off later). No target set (the default
+ * after pe_init, or NULL): no notes. */
+typedef int16_t (*pe_target_fn)(uint8_t pad, uint8_t *ch, uint8_t *din_mirror);
+void pe_set_target(pe_target_fn fn);
+
 /* adc_buffer: the raw 12-bit buffer from app_init (ADC_MAP order).
  * Configuration starts at the settings defaults (peak-window, linear,
  * poly pressure, medium threshold). on_sounding may be NULL. */
 void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding);
 
-/* VEL_*, CURVE_*, PRESS_*, THRESH_* from instrument/settings.h. */
+/* VEL_*, CURVE_*, PRESS_*, THRESH_* from instrument/settings.h. Switching
+ * into VEL_TWO_STAGE resets the Two-stage engine (sends nothing): pads down
+ * at that moment stay silent until released and pressed again. */
 void pe_configure(uint8_t velocity_mode, uint8_t curve, uint8_t pressure_mode, uint8_t threshold);
 
 /* pad: grid index 11..88. pitch -1 (or any value outside 0..127): ignored.
  * ch: 0..15. din_mirror: also send on DINMIDI. now: ms counter. */
 void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32_t now);
 void pe_release(uint8_t pad, uint32_t now);
+/* In VEL_TWO_STAGE both are ignored: the engine in pe_poll drives the notes
+ * (pe_set_target supplies pitch, channel and DIN flag). */
 
-/* Peak windows and pressure; call every main loop pass. Pressure runs on
+/* Peak windows, the Two-stage engine (VEL_TWO_STAGE: once per new ms, on
+ * the raw buffer) and pressure; call every main loop pass. Pressure runs on
  * the first poll with a new now (so once per ms): each HELD pad's raw
  * sample is filtered, then poly pressure (max over the pads sharing a
  * pitch) or channel pressure (max over all held pads) is sent to
@@ -45,7 +59,9 @@ void pe_release(uint8_t pad, uint32_t now);
  * pads send none. */
 void pe_poll(uint32_t now);
 
-/* Note Off for every sounding note; drops pending captures without sending
+/* (Two-stage: the engine restarts, so pads still down stay silent until
+ * released and pressed again; same for pe_forget_all.)
+ * Note Off for every sounding note; drops pending captures without sending
  * anything; every pad idle (a later pe_release of those pads is silent).
  * Channel pressure goes back to 0 where the last value sent wasn't 0 (as on
  * the last pe_release of a held pad). */

@@ -2,6 +2,7 @@
 #include "instrument/ui.h"
 #include "instrument/settings.h"
 #include "pads/pad_engine.h"
+#include "pads/pad_velocity.h"
 #include "scales/scales.h"
 #include "stubs/io_stub.h"
 #include "app_defs.h"
@@ -537,6 +538,66 @@ static void test_transport_change_forgets_held_notes(void)
 	CHECK_EQ(io_n, 0);
 }
 
+static void ts_two_stage(uint32_t now)
+{
+	struct settings s = *ui_settings();
+
+	s.velocity_mode = VEL_TWO_STAGE;
+	ui_apply_settings(&s, now);
+}
+
+/* raw ramp on pad 45 at 10 per ms from `from`, one ui_poll per ms */
+static uint32_t ts_ramp(uint32_t t, uint16_t from, uint16_t to)
+{
+	uint16_t v;
+
+	for (v = from; v <= to; v = (uint16_t)(v + 10)) {
+		io_adc[pad_raw_index(45)] = v;
+		ui_poll(++t);
+	}
+	return t;
+}
+
+static void test_two_stage_plays_scale_pitch(void)
+{
+	struct scale_ctx c;
+	const struct settings *st;
+	uint32_t t = T0 + 10;
+
+	setup();
+	ts_two_stage(T0);
+	memset(io_adc, 0, sizeof io_adc);
+	ui_poll(t);
+	st = ui_settings();
+	c.root = st->root;
+	c.scale = st->scale;
+	c.octave = st->octave;
+	c.layout = st->layout;
+	c.absolute_root = st->absolute_root;
+	t = ts_ramp(t, 0, 700);
+	CHECK_EQ(count_kind(0, 'N'), 1);
+	CHECK_EQ(io_log[0].note, scale_pad_pitch(&c, 45));
+	CHECK_EQ(io_log[0].ch, st->channel);
+	/* library press/release from ui_pad do nothing in this mode */
+	ui_pad(46, 100, t);
+	ui_pad(46, 0, t + 1);
+	CHECK_EQ(count_kind(0, 'N'), 1);
+}
+
+static void test_two_stage_no_note_while_menu_open(void)
+{
+	uint32_t t = T0 + 10;
+
+	setup();
+	ts_two_stage(T0);
+	memset(io_adc, 0, sizeof io_adc);
+	ui_poll(t);
+	setup_tap(t + 1);
+	CHECK_EQ(ui_menu_open(), 1);
+	t = ts_ramp(t + 100, 0, 700);
+	CHECK_EQ(count_kind(0, 'N'), 0);
+}
+
 void test_ui_all(void)
 {
 	RUN(test_play_page_colours_default);
@@ -563,4 +624,6 @@ void test_ui_all(void)
 	RUN(test_apply_settings_change);
 	RUN(test_setup_led_reflects_protocol);
 	RUN(test_transport_change_forgets_held_notes);
+	RUN(test_two_stage_plays_scale_pitch);
+	RUN(test_two_stage_no_note_while_menu_open);
 }

@@ -1,5 +1,6 @@
 #include "pads/pad_engine.h"
 #include "pads/pad_velocity.h"
+#include "pads/twostage.h"
 #include "platform/pads.h"
 #include "instrument/io.h"
 #include "instrument/settings.h"
@@ -80,6 +81,12 @@ static uint8_t g_curve;
 static uint8_t g_press_mode;
 static uint8_t g_threshold;
 
+/* Two-stage: the engine, the main loop's current ms (for its callback) and
+ * the provider of pitch/channel/DIN at its Note On */
+static ts_engine g_ts;
+static uint32_t g_now;
+static pe_target_fn g_target;
+
 static uint8_t slot_to_pad(uint8_t slot)
 {
     return (uint8_t)((8 - slot / 8) * 10 + 1 + slot % 8);
@@ -136,7 +143,7 @@ static void pressure_copy(struct pe_pad *dst, const struct pe_pad *src)
 
 /* capture (or zero-latency press) finished: the pad now sounds its pitch.
  * The press time is no longer needed: t now holds pressure send times. */
-static void sound(struct pe_pad *p, uint32_t now)
+static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
 {
     uint8_t slot = (uint8_t)(p - g_pad);
 
@@ -165,19 +172,21 @@ static void sound(struct pe_pad *p, uint32_t now)
     pressure_start(p->t.sent, (uint16_t)now);
     p->sent12 = 0;
     p->sent7 = 0;
+    io_note_on(USBSTANDALONE, p->ch, p->pitch, vel);
+    if (p->din)
     {
-        uint16_t vel = velocity(p->peak);
-
-        io_note_on(USBSTANDALONE, p->ch, p->pitch, vel);
-        if (p->din)
-        {
-            io_note_on(DINMIDI, p->ch, p->pitch, vel);
-        }
+        io_note_on(DINMIDI, p->ch, p->pitch, vel);
     }
     if (g_on_sounding != NULL)
     {
         g_on_sounding(p->pitch, 1);
     }
+}
+
+/* capture (or zero-latency press) finished: velocity from the peak */
+static void sound(struct pe_pad *p, uint32_t now)
+{
+    sound_v(p, velocity(p->peak), now);
 }
 
 /* a held pad stops sounding its pitch */
@@ -222,6 +231,66 @@ static void channel_zero(void)
     }
     g_chan.sent12 = 0;
     g_chan.sent7 = 0;
+}
+
+/* a HELD pad lets go: its pitch ends with the last holder, and channel
+ * pressure goes to 0 at once when it was the last held pad */
+static void release_held(struct pe_pad *p)
+{
+    silence(p);
+    if (g_nheld == 0)
+    {
+        channel_zero();
+    }
+}
+
+/* Two-stage engine callback: adc_ch is a raw buffer index (ADC_MAP order) */
+static void ts_note(void *ctx, u8 adc_ch, u8 on, u16 vel)
+{
+    uint8_t pad;
+    uint8_t slot;
+    struct pe_pad *p;
+
+    (void)ctx;
+    if (adc_ch >= PAD_COUNT)
+    {
+        return;
+    }
+    pad = ADC_MAP[adc_ch];
+    slot = pad_to_adcmax_slot(pad);
+    if (slot == PAD_NO_SLOT)
+    {
+        return;
+    }
+    p = &g_pad[slot];
+    if (!on)
+    {
+        /* only a pad this engine started is HELD: no orphan Off */
+        if (p->state == PE_HELD)
+        {
+            release_held(p);
+        }
+        return;
+    }
+    if (p->state != PE_IDLE || g_target == NULL)
+    {
+        return;
+    }
+    {
+        uint8_t ch = 0;
+        uint8_t din = 0;
+        int16_t pitch = g_target(pad, &ch, &din);
+
+        if (pitch < 0 || pitch > 127)
+        {
+            return;
+        }
+        p->pitch = (uint8_t)pitch;
+        p->ch = ch & 0x0F;
+        p->din = din ? 1 : 0;
+        p->peak = 0;
+        sound_v(p, pad_curve(vel, g_curve), g_now);
+    }
 }
 
 static uint8_t interval_passed(uint16_t sent, uint16_t now16)
@@ -390,6 +459,8 @@ void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding)
     memset(&g_chan, 0, sizeof g_chan);
     g_nheld = 0;
     g_ticked = 0;
+    g_target = NULL;
+    ts_init(&g_ts);
     g_adc = adc_buffer;
     g_on_sounding = on_sounding;
     pe_configure(VEL_PEAK_WINDOW, CURVE_LINEAR, PRESS_POLY, THRESH_MED);
@@ -397,10 +468,19 @@ void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding)
 
 void pe_configure(uint8_t velocity_mode, uint8_t curve, uint8_t pressure_mode, uint8_t threshold)
 {
+    if (velocity_mode == VEL_TWO_STAGE && g_vel_mode != VEL_TWO_STAGE)
+    {
+        ts_init(&g_ts);
+    }
     g_vel_mode = velocity_mode;
     g_curve = curve;
     g_press_mode = pressure_mode;
     g_threshold = threshold;
+}
+
+void pe_set_target(pe_target_fn fn)
+{
+    g_target = fn;
 }
 
 void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32_t now)
@@ -408,7 +488,7 @@ void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32
     uint8_t slot = pad_to_adcmax_slot(pad);
     struct pe_pad *p;
 
-    if (slot == PAD_NO_SLOT || pitch < 0 || pitch > 127)
+    if (g_vel_mode == VEL_TWO_STAGE || slot == PAD_NO_SLOT || pitch < 0 || pitch > 127)
     {
         return;
     }
@@ -439,7 +519,7 @@ void pe_release(uint8_t pad, uint32_t now)
     uint8_t slot = pad_to_adcmax_slot(pad);
     struct pe_pad *p;
 
-    if (slot == PAD_NO_SLOT)
+    if (g_vel_mode == VEL_TWO_STAGE || slot == PAD_NO_SLOT)
     {
         return;
     }
@@ -452,12 +532,7 @@ void pe_release(uint8_t pad, uint32_t now)
     }
     if (p->state == PE_HELD)
     {
-        silence(p);
-        if (g_nheld == 0)
-        {
-            /* the last held pad: channel pressure to 0 at once */
-            channel_zero();
-        }
+        release_held(p);
     }
 }
 
@@ -488,6 +563,11 @@ void pe_poll(uint32_t now)
     }
     g_ticked = 1;
     g_tick = now;
+    if (g_vel_mode == VEL_TWO_STAGE && g_adc != NULL)
+    {
+        g_now = now;
+        ts_tick(&g_ts, g_adc, now, ts_note, NULL);
+    }
     pressure_pass(now);
 }
 
@@ -509,6 +589,7 @@ void pe_release_all(void)
     memset(g_count, 0, sizeof g_count);
     g_nheld = 0;
     channel_zero();
+    ts_init(&g_ts);
 }
 
 void pe_forget_all(void)
@@ -534,6 +615,7 @@ void pe_forget_all(void)
     }
     g_chan.sent12 = 0;
     g_chan.sent7 = 0;
+    ts_init(&g_ts);
 }
 
 uint8_t pe_notes_active(void)

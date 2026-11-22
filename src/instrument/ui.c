@@ -235,8 +235,22 @@ void ui_on_sounding(uint8_t pitch, uint8_t on)
 				draw((uint8_t)(r + col));
 }
 
+/* the pad engine's Two-stage target: what the pad plays when it starts */
+static int16_t pad_target(uint8_t pad, uint8_t *ch, uint8_t *din)
+{
+	struct scale_ctx c;
+
+	if (g_menu)
+		return -1;
+	ctx(&c);
+	*ch = g_s.channel;
+	*din = g_s.din_mirror;
+	return scale_pad_pitch(&c, pad);
+}
+
 void ui_init(uint32_t now)
 {
+	pe_set_target(pad_target);
 	settings_load(&g_s);
 	configure();
 	memset(g_sounding, 0, sizeof g_sounding);
