@@ -37,6 +37,10 @@ void hal_send_channel_pressure2(u8 port, u8 ch, u32 value);
  * queue is empty) is dropped silently, with nothing sent. In alt 0 and on
  * DINMIDI the library's hal_send_sysex is used unchanged. */
 
+/* Called once per main-loop pass, from the midi_parsers_poll wrap, in
+ * both USB modes, after USB and DIN parsing. NULL disables it. */
+void midi2_set_main_loop_hook(void (*hook)(void));
+
 /* Debug checkpoint only: while paused, received UMP is not dispatched to the
  * app (the RX ring fills and EP1 OUT stays NAK). */
 void midi2_debug_pause_rx(u8 paused);

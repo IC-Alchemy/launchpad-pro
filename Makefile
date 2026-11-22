@@ -5,7 +5,7 @@ TOOLS = tools
 SOURCES += src/app.c
 
 # firmware-only sources (USB MIDI 2.0 transport); not part of the simulator
-FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c)
+FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c src/scales/*.c src/instrument/*.c)
 
 INCLUDES += -Iinclude -Isrc -I
 
@@ -18,7 +18,8 @@ LIB_WORK = $(BUILDDIR)/lib_trim
 OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES))))
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
-SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c $(wildcard src/pads/*.c)
+SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
+	src/scales/scales.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c
 
 # output files
 SYX = $(BUILDDIR)/launchpad_pro.syx
@@ -27,7 +28,6 @@ HEX = $(BUILDDIR)/launchpad_pro.hex
 HEXTOSYX = $(BUILDDIR)/hextosyx
 SIMULATOR = $(BUILDDIR)/simulator
 TEST_BIN = $(BUILDDIR)/tests/run_tests
-APP_TEST_BIN = $(BUILDDIR)/tests/run_app_tests
 
 # host unit tests: later tasks append their files to TEST_SOURCES
 TEST_SOURCES += tests/run_tests.c tests/test_harness.c
@@ -38,12 +38,14 @@ TEST_SOURCES += tests/test_ump_rx.c src/ump/ump_rx.c
 TEST_SOURCES += tests/test_usb_desc.c src/usb/usb_desc.c
 TEST_SOURCES += tests/test_usb_prop.c src/usb/usb_prop.c src/usb/usb_midi2.c src/usb/usb_endp.c
 TEST_SOURCES += tests/test_usb_data.c
+TEST_SOURCES += tests/test_pad_velocity.c src/pads/pad_velocity.c
+TEST_SOURCES += tests/test_scales.c src/scales/scales.c
+TEST_SOURCES += tests/test_settings.c src/instrument/settings.c tests/stubs/io_stub.c
+TEST_SOURCES += tests/test_pad_engine.c src/pads/pad_engine.c
+TEST_SOURCES += tests/test_pressure.c
+TEST_SOURCES += tests/test_ui.c src/instrument/ui.c
 TEST_SOURCES += tests/test_pads.c
-TEST_SOURCES += tests/test_padscope.c src/pads/padscope.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
-# app tests: src/app.c with recording hal stubs; separate binary because
-# tests/run_tests links the real usb_midi2.c and stubs.c, which clash with it
-APP_TEST_SOURCES = tests/test_app_modes.c tests/stubs/app_stubs.c src/app.c src/pads/twostage.c src/ump/ump_codec.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
@@ -60,7 +62,7 @@ CFLAGS  = -Os -Wall -I.\
 -D_STM32F103RBT6_  -D_STM3x_  -D_STM32x_ -mthumb -mcpu=cortex-m3 \
 -fsigned-char  -DSTM32F10X_MD -DUSE_STDPERIPH_DRIVER -DHSE_VALUE=6000000UL \
 -DCMSIS -DUSE_GLOBAL_CONFIG -ffunction-sections -std=c99  -mlittle-endian \
-$(if $(PADSCOPE),-DPADSCOPE) $(INCLUDES) -o
+$(INCLUDES) -o
 
 LDSCRIPT = stm32_flash.ld
 
@@ -83,7 +85,7 @@ $(HEXTOSYX): | submodules
 # build the simulator (it's a very basic test of the code before it runs on the device!)
 $(SIMULATOR): $(SIM_SOURCES) $(wildcard include/*.h src/*/*.h)
 	mkdir -p $(BUILDDIR)
-	$(HOST_GCC) -g3 -O0 -std=c99 -DSIMULATOR -Iinclude -Isrc $(SIM_SOURCES) -o $(SIMULATOR)
+	$(HOST_GCC) -g3 -O0 -std=c99 -Iinclude -Isrc $(SIM_SOURCES) -o $(SIMULATOR)
 
 $(HEX): $(ELF)
 	$(OBJCOPY) -O ihex $< $@
@@ -105,16 +107,6 @@ DEPENDS := $(OBJECTS:.o=.d)
 
 -include $(DEPENDS)
 
-# PADSCOPE stamp: rewritten only when the value changes, so switching
-# PADSCOPE=1 <-> default rebuilds the firmware objects without a make clean
-PADSCOPE_FLAG = $(BUILDDIR)/padscope.flag
-.PHONY: force
-$(PADSCOPE_FLAG): force
-	@mkdir -p $(BUILDDIR)
-	@echo "PADSCOPE=$(PADSCOPE)" | cmp -s - $@ || echo "PADSCOPE=$(PADSCOPE)" > $@
-
-$(OBJECTS): $(PADSCOPE_FLAG)
-
 $(BUILDDIR)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) -c $(CFLAGS) -MMD -o $@ $<
@@ -128,12 +120,8 @@ $(GOLDEN_DESC): lib/launchpad_pro.a
 	cd $(BUILDDIR)/tests/ar && arm-none-eabi-ar x $(CURDIR)/lib/launchpad_pro.a usb_desc.o
 	arm-none-eabi-objcopy -O binary --only-section=.rodata $(BUILDDIR)/tests/ar/usb_desc.o $@
 
-test: $(TEST_BIN) $(APP_TEST_BIN)
-	@rc=0; ./$(TEST_BIN) || rc=1; ./$(APP_TEST_BIN) || rc=1; exit $$rc
-
-$(APP_TEST_BIN): $(APP_TEST_SOURCES) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
-	mkdir -p $(dir $@)
-	$(HOST_GCC) $(TEST_CFLAGS) $(APP_TEST_SOURCES) -o $@
+test: $(TEST_BIN)
+	./$(TEST_BIN)
 
 $(TEST_BIN): $(GOLDEN_DESC) $(TEST_SOURCES) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
 	mkdir -p $(dir $@)

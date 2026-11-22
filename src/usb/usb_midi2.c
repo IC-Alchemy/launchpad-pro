@@ -233,6 +233,13 @@ void __wrap_midi_parsers_init(void)
 
 /* Main-loop wraps: run the pending service first. */
 
+static void (*main_loop_hook)(void);
+
+void midi2_set_main_loop_hook(void (*hook)(void))
+{
+	main_loop_hook = hook;
+}
+
 void __wrap_midi_parsers_poll(void)
 {
 	uint32_t s;
@@ -240,6 +247,8 @@ void __wrap_midi_parsers_poll(void)
 	usb_midi2_service();
 	if (!alt) {
 		__real_midi_parsers_poll();
+		if (main_loop_hook)
+			main_loop_hook();
 		return;
 	}
 	if (!rx_paused)
@@ -253,6 +262,8 @@ void __wrap_midi_parsers_poll(void)
 		SetEPRxValid(1);
 	irq_restore(s);
 	midi_parse_rx_byte_stream(&MIDIDinIn, DinRx, DINMIDI);
+	if (main_loop_hook)
+		main_loop_hook();
 }
 
 void __wrap_usbmidi_poll(void)
