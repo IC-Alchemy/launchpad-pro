@@ -9,7 +9,7 @@ Turn the open Launchpad Pro firmware into a dedicated, playable scale instrument
 that talks **USB MIDI 2.0** to a Windows PC (Windows MIDI Services), so that pad
 **velocity and pressure reach the host at far higher resolution** than MIDI 1.0's
 7 bits. The note layouts and scale selection are modelled on **Launchpad95**'s
-Instrument/Scale mode. A settings menu lets the player choose between two
+Instrument/Scale mode. A settings menu lets the player choose between three
 velocity algorithms and tune other playing options.
 
 Why: the pads' sensors are 12-bit, but the stock path squeezes velocity and
@@ -123,7 +123,7 @@ press event, then squeezes it to 7 bits with its own curve. So:
   and use the highest of `ADC_Max` and the window peak. This catches presses
   that keep rising after the library's trigger point (slow or "pushed"
   strikes), giving the most even response. Adds about 2 ms of note-on latency.
-- In both modes the menu curve is applied to the raw peak. MIDI 1.0 output
+- In every mode the menu curve is applied to the raw peak. MIDI 1.0 output
   uses the same shaped value, scaled as described in section 3. The Fixed
   setting sends full velocity.
   *(Builder's call; if reading `ADC_Max` proves unreliable on the device,
@@ -437,7 +437,7 @@ bright):
   pressure; check that MIDI 1.0 apps still see the ports; exercise DIN
   routing in both directions on both USB alternate settings; check MIDI 1.0
   fallback on a machine without MIDI Services; reconnect and reset during
-  traffic; compare the feel and measured note-on latency of both velocity
+  traffic; compare the feel and measured note-on latency of the velocity
   modes against the stock device.
 
 ### 8. MIDI-CI and Property Exchange (`src/ci/`)
@@ -534,7 +534,7 @@ The player has the hardware and will test on Windows at the checkpoint.
      testing with an alt 0 host.)
    Record the Windows build and the MIDI driver version with the results.
    If something fails, fix it here, or replace `c_midi.o`, before going on.
-2. **Instrument.** Scale engine, pad engine (both velocity modes, curves,
+2. **Instrument.** Scale engine, pad engine (all velocity modes, curves,
    pressure), menu, persistence, all host-tested.
 3. **MIDI-CI and Property Exchange.** Section 8, host-tested, built on the
    instrument's settings model.
