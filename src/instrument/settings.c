@@ -27,7 +27,7 @@ uint8_t settings_valid(const struct settings *s)
 {
 	return s->root < 12 && s->scale < SCALE_COUNT && s->octave < 8 &&
 	       s->layout < LAYOUT_COUNT && s->absolute_root <= 1 &&
-	       s->din_mirror <= 1 && s->velocity_mode < 3 &&
+	       s->din_mirror <= 1 && s->velocity_mode < 4 &&
 	       s->velocity_curve < 3 && s->pressure_mode < 3 &&
 	       s->pressure_threshold < 3 && s->channel < 16;
 }

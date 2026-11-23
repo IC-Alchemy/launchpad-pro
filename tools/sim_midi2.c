@@ -9,6 +9,15 @@
 u16 ADC_Max[64];
 u16 PadCalibration[4] = {256, 1023, 512, 769};
 
+void pad_setcalibration(u16 threshold, u16 c1, u16 aftertouch_lo, u16 aftertouch_hi)
+{
+	PadCalibration[0] = threshold;
+	PadCalibration[1] = c1;
+	PadCalibration[2] = aftertouch_lo;
+	PadCalibration[3] = aftertouch_hi;
+	printf("...pad_setcalibration(%d, %d, %d, %d);\n", threshold, c1, aftertouch_lo, aftertouch_hi);
+}
+
 u8 midi2_active(void)
 {
 	return 0;

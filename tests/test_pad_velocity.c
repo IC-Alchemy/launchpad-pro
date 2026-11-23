@@ -88,6 +88,62 @@ static void test_velocity16_bad_calibration(void)
     CHECK_EQ(pad_velocity16(100, 256, 300), 1);
 }
 
+/* 12-bit peak mapping: start (thr+80)*4, top full*4 */
+static void test_velocity16_raw12_range(void)
+{
+    CHECK_EQ(pad_velocity16_raw12(0, 256, 1023), 1);
+    CHECK_EQ(pad_velocity16_raw12(336 * 4, 256, 1023), 1);      /* at start */
+    CHECK(pad_velocity16_raw12(336 * 4 + 1, 256, 1023) >= 1);   /* just above */
+    CHECK_EQ(pad_velocity16_raw12(4092, 256, 1023), 0xFFFF);    /* top */
+    CHECK_EQ(pad_velocity16_raw12(4095, 256, 1023), 0xFFFF);    /* clamp */
+    CHECK_EQ(pad_velocity16_raw12(4095, 256, 1000), 0xFFFF);    /* above a lower top */
+    unsigned v = pad_velocity16_raw12(2716, 256, 1023);
+    CHECK(v > 0x7E00 && v < 0x8200);
+}
+
+static void test_velocity16_raw12_bad_calibration(void)
+{
+    CHECK_EQ(pad_velocity16_raw12(2000, 256, 300), 0xFFFF);
+    CHECK_EQ(pad_velocity16_raw12(400, 256, 300), 1);
+}
+
+static void test_velocity16_raw12_monotonic_and_finer(void)
+{
+    unsigned prev = 0, distinct = 0;
+    for (unsigned a = 0; a <= 4095; a++) {
+        unsigned v = pad_velocity16_raw12((unsigned short)a, 256, 1023);
+        CHECK(v >= 1);
+        CHECK(v >= prev);
+        if (v != prev) distinct++;
+        prev = v;
+    }
+    /* about 4x the 10-bit steps (688 in 336..1023) */
+    CHECK(distinct > 2600);
+    /* two raw values 1 apart: the 10-bit mapping cannot tell them apart */
+    CHECK_EQ((2800 + 2) >> 2, (2801 + 2) >> 2); /* same 10-bit bucket: 700 */
+    CHECK(pad_velocity16_raw12(2800, 256, 1023) < pad_velocity16_raw12(2801, 256, 1023));
+}
+
+/* raw12 = 4 * peak10 agrees with the 10-bit mapping exactly */
+static void test_velocity16_raw12_matches_10bit(void)
+{
+    for (unsigned p = 0; p <= 1023; p++) {
+        CHECK_EQ(pad_velocity16_raw12((unsigned short)(p * 4), 256, 1023),
+                 pad_velocity16((unsigned short)p, 256, 1023));
+        CHECK_EQ(pad_velocity16_raw12((unsigned short)(p * 4), 20, 1023),
+                 pad_velocity16((unsigned short)p, 20, 1023));
+    }
+    /* values between the 4-steps lie between the neighbouring 10-bit results */
+    for (unsigned p = 340; p < 1023; p++) {
+        unsigned lo = pad_velocity16((unsigned short)p, 20, 1023);
+        unsigned hi = pad_velocity16((unsigned short)(p + 1), 20, 1023);
+        for (unsigned k = 0; k < 4; k++) {
+            unsigned v = pad_velocity16_raw12((unsigned short)(p * 4 + k), 20, 1023);
+            CHECK(v >= lo && v <= hi);
+        }
+    }
+}
+
 static void test_raw_index_inverts_adc_map(void)
 {
     for (int i = 0; i < 64; i++)
@@ -151,6 +207,10 @@ void test_pad_velocity_all(void)
     RUN(test_velocity16_range);
     RUN(test_velocity16_monotonic_and_fine);
     RUN(test_velocity16_bad_calibration);
+    RUN(test_velocity16_raw12_range);
+    RUN(test_velocity16_raw12_bad_calibration);
+    RUN(test_velocity16_raw12_monotonic_and_finer);
+    RUN(test_velocity16_raw12_matches_10bit);
     RUN(test_raw_index_inverts_adc_map);
     RUN(test_curve_endpoints);
     RUN(test_curve_shape);

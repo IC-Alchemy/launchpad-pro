@@ -206,6 +206,23 @@ static void test_alt0_usbmidi_poll_atomic(void)
 	CHECK_EQ(stub_irq_depth, 0);				/* balanced */
 }
 
+/* Alt 0: hal_send_* reach c_midi from the timer ISR and the main loop, so the
+ * real call runs with interrupts masked. */
+static void test_alt0_hal_send_masked(void)
+{
+	static const uint8_t syx[] = { 0xF0, 0x7D, 0x01, 0xF7 };
+	enter_alt0();
+	stub.real_midi_irq_depth = -1;
+	stub.real_sysex_irq_depth = -1;
+	__wrap_hal_send_midi(USBSTANDALONE, 0x90, 60, 100);
+	__wrap_hal_send_sysex(USBSTANDALONE, syx, sizeof syx);
+	CHECK_EQ(stub.real_midi_calls, 1);
+	CHECK_EQ(stub.real_sysex_calls, 1);
+	CHECK(stub.real_midi_irq_depth > 0);
+	CHECK(stub.real_sysex_irq_depth > 0);
+	CHECK_EQ(stub_irq_depth, 0);
+}
+
 static void test_alt1_entry_runs_service_first(void)
 {
 	static const uint32_t w[1] = {0x20903C40};
@@ -707,6 +724,7 @@ void test_usb_data_all(void)
 	RUN(test_din_parsed_in_both_alts);
 	RUN(test_legacy_paths_gated_in_alt1);
 	RUN(test_alt0_usbmidi_poll_atomic);
+	RUN(test_alt0_hal_send_masked);
 	RUN(test_alt1_entry_runs_service_first);
 	RUN(test_usbmidi_poll_tx_conditions);
 	RUN(test_note_on2_paths);

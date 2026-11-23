@@ -39,6 +39,7 @@
 #include "midi2.h"
 #include "instrument/ui.h"
 #include "pads/pad_engine.h"
+#include "platform/pads.h"
 
 //______________________________________________________________________________
 //
@@ -143,6 +144,7 @@ void app_init(const u16 *adc_raw)
 {
     g_usb_alt = midi2_usb_alt();
     g_usb_midi2 = midi2_active();
+    pad_setcalibration(PAD_LIB_THRESHOLD, 1023, 512, 769);
     pe_init(adc_raw, ui_on_sounding);
     ui_init(g_ms);
     midi2_set_main_loop_hook(main_loop);

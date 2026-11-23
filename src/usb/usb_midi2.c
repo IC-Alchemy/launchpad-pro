@@ -311,7 +311,10 @@ void __wrap_hal_send_midi(uint8_t port, uint8_t status, uint8_t d1, uint8_t d2)
 	uint8_t words, kind = (uint8_t)(status >> 4);
 
 	if (port > USBMIDI || !alt) {
+		/* may be reached from interrupt context as well as the main loop; mask so pushes never interleave */
+		uint32_t s = irq_save();
 		__real_hal_send_midi(port, status, d1, d2);
+		irq_restore(s);
 		return;
 	}
 	words = ump_from_midi1(m, port, status, d1, d2,
@@ -331,7 +334,9 @@ void __wrap_hal_send_midi(uint8_t port, uint8_t status, uint8_t d1, uint8_t d2)
 void __wrap_hal_send_sysex(uint8_t port, const uint8_t *data, uint16_t len)
 {
 	if (port > USBMIDI || !alt) {
+		uint32_t s = irq_save();
 		__real_hal_send_sysex(port, data, len);
+		irq_restore(s);
 		return;
 	}
 	ump_tx_push_sysex7(port, data, len);		/* all or nothing, keeps the headroom */

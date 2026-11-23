@@ -34,7 +34,7 @@ static void test_record_round_trip(void)
 
 	settings_defaults(&s);
 	s.root = 7; s.scale = 24; s.octave = 2; s.layout = 4; s.absolute_root = 1;
-	s.velocity_mode = VEL_FIXED; s.velocity_curve = CURVE_HARD;
+	s.velocity_mode = VEL_TWO_STAGE; s.velocity_curve = CURVE_HARD;
 	s.pressure_mode = PRESS_OFF; s.pressure_threshold = THRESH_HIGH;
 	s.din_mirror = 1; s.channel = 15;
 	settings_encode(&s, rec);
@@ -52,6 +52,18 @@ static void test_record_round_trip(void)
 	back = d;
 	CHECK_EQ(settings_decode(rec, &back), 0);
 	CHECK(same(&back, &d));
+}
+
+static void test_velocity_mode_range(void)
+{
+	struct settings s;
+
+	settings_defaults(&s);
+	s.velocity_mode = 3;
+	CHECK_EQ(settings_valid(&s), 1);
+	CHECK_EQ(VEL_TWO_STAGE, 3);
+	s.velocity_mode = 4;
+	CHECK_EQ(settings_valid(&s), 0);
 }
 
 static void test_blank_flash_loads_defaults(void)
@@ -150,6 +162,7 @@ void test_settings_all(void)
 {
 	RUN(test_defaults_valid);
 	RUN(test_record_round_trip);
+	RUN(test_velocity_mode_range);
 	RUN(test_blank_flash_loads_defaults);
 	RUN(test_corrupt_record_loads_defaults);
 	RUN(test_save_waits_for_quiet_and_no_notes);

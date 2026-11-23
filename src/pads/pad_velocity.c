@@ -35,6 +35,26 @@ uint16_t pad_velocity16(uint16_t adc_max, uint16_t threshold, uint16_t full_scal
     return v == 0 ? 1 : (uint16_t)v;
 }
 
+uint16_t pad_velocity16_raw12(uint16_t raw12, uint16_t threshold, uint16_t full_scale)
+{
+    uint32_t lo = ((uint32_t)threshold + PAD_VELOCITY_OFFSET) * 4u;
+    uint32_t top = (uint32_t)full_scale * 4u;
+    uint32_t v;
+
+    if (raw12 <= lo)
+    {
+        return 1;
+    }
+    if (top <= lo || raw12 >= top)
+    {
+        return 0xFFFF;
+    }
+    /* (raw12 - lo) < 4096, so the product is below 4096 * 65535 and fits
+     * 32 bits; no 64-bit division */
+    v = ((uint32_t)(raw12 - lo) * 0xFFFFu) / (top - lo);
+    return v == 0 ? 1 : (uint16_t)v;
+}
+
 uint8_t pad_raw_index(uint8_t pad)
 {
     uint8_t row = pad / 10;  /* 1..8 */

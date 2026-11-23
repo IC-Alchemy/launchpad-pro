@@ -19,7 +19,7 @@ OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_S
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
 SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
-	src/scales/scales.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c
+	src/scales/scales.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c src/pads/twostage.c
 
 # output files
 SYX = $(BUILDDIR)/launchpad_pro.syx
@@ -44,6 +44,8 @@ TEST_SOURCES += tests/test_settings.c src/instrument/settings.c tests/stubs/io_s
 TEST_SOURCES += tests/test_pad_engine.c src/pads/pad_engine.c
 TEST_SOURCES += tests/test_pressure.c
 TEST_SOURCES += tests/test_ui.c src/instrument/ui.c
+TEST_SOURCES += tests/test_pads.c
+TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 

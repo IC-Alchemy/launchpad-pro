@@ -86,6 +86,89 @@ static void test_peak_window_waits_and_takes_max(void)
     CHECK_EQ(io_n, 1);
 }
 
+/* the peak-window velocity for a 12-bit peak, with the default calibration */
+static uint16_t pw_vel12(uint16_t raw12)
+{
+    return pad_curve(pad_velocity16_raw12(raw12, PadCalibration[0], PadCalibration[1]), CURVE_LINEAR);
+}
+
+static void test_peak_window_uses_12bit_peak(void)
+{
+    uint32_t v1, v2;
+
+    /* raw 2000 and 2001 share one 10-bit bucket ((raw+2)>>2 = 500 for both),
+     * but differ at 12 bits */
+    CHECK_EQ((2000 + 2) >> 2, (2001 + 2) >> 2);
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 0);
+    set_raw(45, 2000);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    v1 = io_log[0].v;
+    CHECK_EQ(v1, pw_vel12(2000));
+
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 0);
+    set_raw(45, 2001);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    v2 = io_log[0].v;
+    CHECK_EQ(v2, pw_vel12(2001));
+    CHECK(v2 > v1);
+}
+
+static void test_peak_window_seeds_from_adcmax_times_4(void)
+{
+    setup();
+    set_adcmax(45, 679);
+    set_raw(45, 100); /* never exceeds the seed */
+    pe_press(45, 64, 0, 0, 0);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    CHECK_EQ(io_log[0].v, pw_vel12(679 * 4));
+    CHECK_EQ(io_log[0].v, pad_velocity16(679, PadCalibration[0], PadCalibration[1]));
+}
+
+static void test_peak_window_seed_clamps_to_4095(void)
+{
+    setup();
+    set_adcmax(45, 1100); /* above the 10-bit range */
+    pe_press(45, 64, 0, 0, 0);
+    pe_poll(1);
+    pe_poll(PEAK_WINDOW_MS);
+    CHECK_EQ(io_n, 1);
+    CHECK_EQ(io_log[0].v, 0xFFFF); /* seed 4095 -> full scale, linear curve */
+}
+
+static void test_peak_window_release_inside_window_keeps_12bit_peak(void)
+{
+    setup();
+    set_adcmax(45, 400);
+    pe_press(45, 64, 0, 0, 10);
+    set_raw(45, 2002);
+    pe_release(45, 11);
+    CHECK_EQ(io_n, 2);
+    CHECK_EQ(io_log[0].kind, 'N');
+    CHECK_EQ(io_log[0].v, pw_vel12(2002));
+    CHECK_EQ(io_log[1].kind, 'F');
+}
+
+static void test_zero_latency_stays_10bit(void)
+{
+    setup();
+    zero_latency();
+    set_adcmax(45, 679);
+    set_raw(45, 4000); /* the raw buffer is ignored at the press */
+    pe_press(45, 64, 0, 0, 0);
+    CHECK_EQ(io_n, 1);
+    CHECK_EQ(io_log[0].v, pad_velocity16(679, PadCalibration[0], PadCalibration[1]));
+}
+
 static void test_fast_tap_inside_window(void)
 {
     setup();
@@ -517,10 +600,289 @@ static void test_forget_all_ends_din_notes(void)
     CHECK_EQ(io_log[mark + 1].v, 0);
 }
 
+/* ---- Two-stage ---- */
+
+static int16_t tgt_pitch;
+static uint8_t tgt_ch;
+static uint8_t tgt_din;
+static int tgt_calls;
+
+static int16_t target(uint8_t pad, uint8_t *ch, uint8_t *din)
+{
+    (void)pad;
+    tgt_calls++;
+    *ch = tgt_ch;
+    *din = tgt_din;
+    return tgt_pitch;
+}
+
+static uint32_t g_t;
+
+static void two_stage_setup(void)
+{
+    setup();
+    memset(io_adc, 0, sizeof io_adc);
+    tgt_pitch = 64;
+    tgt_ch = 2;
+    tgt_din = 0;
+    tgt_calls = 0;
+    pe_set_target(target);
+    pe_configure(VEL_TWO_STAGE, CURVE_LINEAR, PRESS_POLY, THRESH_MED);
+    g_t = 1000;
+    pe_poll(g_t); /* primes the engine on an all-zero frame */
+}
+
+/* one ms per step, each pad's raw value set before the poll */
+static void tick(void)
+{
+    g_t++;
+    pe_poll(g_t);
+}
+
+static void ramp(uint8_t pad, uint16_t from, uint16_t to, uint16_t step)
+{
+    uint16_t v = from;
+
+    while (v < to) {
+        set_raw(pad, v);
+        tick();
+        v = (uint16_t)(v + step);
+    }
+    set_raw(pad, to);
+    tick();
+}
+
+static void let_go(uint8_t pad)
+{
+    int i;
+
+    set_raw(pad, 0);
+    for (i = 0; i < 6; i++)
+        tick();
+}
+
+static int count_ev(char kind)
+{
+    int i, n = 0;
+
+    for (i = 0; i < io_n; i++)
+        if (io_log[i].kind == kind)
+            n++;
+    return n;
+}
+
+static void test_ts_note_on_and_off(void)
+{
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 1);
+    CHECK_EQ(io_log[0].kind, 'N');
+    CHECK_EQ(io_log[0].port, USBSTANDALONE);
+    CHECK_EQ(io_log[0].ch, 2);
+    CHECK_EQ(io_log[0].note, 64);
+    CHECK(io_log[0].v > 0 && io_log[0].v <= 0xFFFF);
+    CHECK_EQ(rec_n, 1);
+    CHECK_EQ(rec_on[0], 1);
+    CHECK_EQ(pe_notes_active(), 1);
+    CHECK_EQ(count_ev('F'), 0);
+    let_go(45);
+    CHECK_EQ(count_ev('N'), 1);
+    CHECK_EQ(count_ev('F'), 1);
+    CHECK_EQ(io_log[io_n - 1].kind, 'F');
+    CHECK_EQ(io_log[io_n - 1].ch, 2);
+    CHECK_EQ(io_log[io_n - 1].note, 64);
+    CHECK_EQ(pe_notes_active(), 0);
+}
+
+static void test_ts_velocity_curve_applied(void)
+{
+    uint32_t lin;
+
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    lin = io_log[0].v;
+    CHECK(lin != 0);
+    two_stage_setup();
+    pe_configure(VEL_TWO_STAGE, CURVE_SOFT, PRESS_POLY, THRESH_MED);
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(io_log[0].v, pad_curve((uint16_t)lin, CURVE_SOFT));
+    CHECK(io_log[0].v != lin);
+}
+
+static void test_ts_faster_is_louder(void)
+{
+    uint32_t slow, fast;
+
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    slow = io_log[0].v;
+    two_stage_setup();
+    ramp(45, 0, 700, 120);
+    fast = io_log[0].v;
+    CHECK(fast > slow);
+}
+
+static void test_ts_library_press_ignored(void)
+{
+    two_stage_setup();
+    set_adcmax(45, 900);
+    pe_press(45, 64, 0, 0, g_t);
+    CHECK_EQ(io_n, 0);
+    CHECK_EQ(pe_notes_active(), 0);
+    pe_release(45, g_t + 1);
+    CHECK_EQ(io_n, 0);
+    CHECK_EQ(rec_n, 0);
+}
+
+static void test_ts_target_minus1(void)
+{
+    two_stage_setup();
+    tgt_pitch = -1;
+    ramp(45, 0, 700, 10);
+    CHECK(tgt_calls >= 1);
+    CHECK_EQ(io_n, 0);
+    CHECK_EQ(pe_notes_active(), 0);
+    let_go(45);
+    CHECK_EQ(io_n, 0);
+}
+
+static void test_ts_no_target_no_notes(void)
+{
+    two_stage_setup();
+    pe_set_target(NULL);
+    ramp(45, 0, 700, 10);
+    let_go(45);
+    CHECK_EQ(io_n, 0);
+}
+
+static void test_ts_din_flag(void)
+{
+    two_stage_setup();
+    tgt_din = 1;
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 2);
+    CHECK_EQ(io_log[1].port, DINMIDI);
+    let_go(45);
+    CHECK_EQ(count_ev('F'), 2);
+}
+
+static void test_ts_same_pitch_shared(void)
+{
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    ramp(46, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 1);
+    CHECK_EQ(rec_n, 1);
+    let_go(45);
+    CHECK_EQ(count_ev('F'), 0);
+    CHECK_EQ(pe_notes_active(), 1);
+    let_go(46);
+    CHECK_EQ(count_ev('F'), 1);
+    CHECK_EQ(rec_n, 2);
+    CHECK_EQ(rec_on[1], 0);
+}
+
+static void test_ts_release_all_while_held(void)
+{
+    int mark;
+
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 1);
+    pe_release_all();
+    CHECK_EQ(count_ev('F'), 1);
+    CHECK_EQ(pe_notes_active(), 0);
+    /* the pad is still down: silent, and no stray Off when it goes up */
+    mark = io_n;
+    set_raw(45, 3000);
+    tick();
+    tick();
+    let_go(45);
+    CHECK_EQ(io_n, mark);
+    /* a new press sounds again */
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 2);
+    CHECK_EQ(pe_notes_active(), 1);
+}
+
+static void test_ts_forget_all_stays_silent(void)
+{
+    int mark;
+
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    pe_forget_all();
+    CHECK_EQ(pe_notes_active(), 0);
+    mark = io_n;
+    set_raw(45, 3000);
+    tick();
+    tick();
+    let_go(45);
+    CHECK_EQ(io_n, mark);
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 2);
+}
+
+static void test_ts_configure_into_two_stage_resets_engine(void)
+{
+    two_stage_setup();
+    pe_configure(VEL_ZERO_LATENCY, CURVE_LINEAR, PRESS_POLY, THRESH_MED);
+    set_raw(45, 3000); /* pad is down when the mode changes */
+    tick();
+    pe_configure(VEL_TWO_STAGE, CURVE_LINEAR, PRESS_POLY, THRESH_MED);
+    CHECK_EQ(io_n, 0); /* the switch itself sends nothing */
+    tick();
+    tick();
+    CHECK_EQ(io_n, 0); /* held through the reset: silent */
+    let_go(45);
+    CHECK_EQ(io_n, 0);
+    ramp(45, 0, 700, 10);
+    CHECK_EQ(count_ev('N'), 1);
+}
+
+static void test_ts_pressure_flows(void)
+{
+    int i;
+
+    two_stage_setup();
+    ramp(45, 0, 700, 10);
+    set_raw(45, 3000);
+    for (i = 0; i < 40; i++)
+        tick();
+    CHECK(count_ev('P') >= 1);
+    for (i = 0; i < io_n; i++)
+        if (io_log[i].kind == 'P') {
+            CHECK_EQ(io_log[i].note, 64);
+            CHECK_EQ(io_log[i].ch, 2);
+        }
+}
+
+static void test_ts_other_modes_unaffected_by_engine(void)
+{
+    setup();
+    memset(io_adc, 0, sizeof io_adc);
+    pe_set_target(target);
+    zero_latency();
+    set_adcmax(45, 679);
+    pe_press(45, 64, 0, 0, 100);
+    CHECK_EQ(io_n, 1);
+    set_raw(45, 700);
+    pe_poll(101);
+    pe_poll(102);
+    CHECK_EQ(count_ev('N'), 1);
+    pe_release(45, 110);
+    CHECK_EQ(count_ev('F'), 1);
+}
+
 void test_pad_engine_all(void)
 {
     RUN(test_zero_latency_note_on_at_press);
     RUN(test_peak_window_waits_and_takes_max);
+    RUN(test_peak_window_uses_12bit_peak);
+    RUN(test_peak_window_seeds_from_adcmax_times_4);
+    RUN(test_peak_window_seed_clamps_to_4095);
+    RUN(test_peak_window_release_inside_window_keeps_12bit_peak);
+    RUN(test_zero_latency_stays_10bit);
     RUN(test_fast_tap_inside_window);
     RUN(test_retrigger_within_window);
     RUN(test_fixed_velocity);
@@ -536,4 +898,17 @@ void test_pad_engine_all(void)
     RUN(test_forget_all_sends_nothing);
     RUN(test_forget_all_resets_channel_pressure);
     RUN(test_forget_all_ends_din_notes);
+    RUN(test_ts_note_on_and_off);
+    RUN(test_ts_velocity_curve_applied);
+    RUN(test_ts_faster_is_louder);
+    RUN(test_ts_library_press_ignored);
+    RUN(test_ts_target_minus1);
+    RUN(test_ts_no_target_no_notes);
+    RUN(test_ts_din_flag);
+    RUN(test_ts_same_pitch_shared);
+    RUN(test_ts_release_all_while_held);
+    RUN(test_ts_forget_all_stays_silent);
+    RUN(test_ts_configure_into_two_stage_resets_engine);
+    RUN(test_ts_pressure_flows);
+    RUN(test_ts_other_modes_unaffected_by_engine);
 }
