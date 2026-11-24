@@ -138,9 +138,12 @@ press event, then squeezes it to 7 bits with its own curve. So:
 - *Two-stage*: the app does its own press detection from the raw 12-bit
   `adc_buffer`, and velocity is the time the reading takes to rise from a low
   threshold T1 to a high threshold T2. Crossing times are interpolated
-  linearly between samples (Q8 ms). Velocity is
-  `0xFFFF * TS_DT_FAST / dt`, floored at `TS_VEL_MIN` (7-bit value 1), so
-  short time is loud, long time soft, with most resolution at the soft end.
+  linearly between samples (Q8 ms). Velocity is logarithmic in dt between two
+  bounds: dt <= `TS_DT_MIN_Q8` (23, about 0.09 ms, a single-tick hit) gives
+  0xFFFF; dt >= `TS_DT_MAX_Q8` (1024, 4 ms) gives `TS_VEL_MIN` (7-bit value 1);
+  between, `TS_VEL_MIN + (0xFFFF - TS_VEL_MIN) * ln(MAX/dt) / ln(MAX/MIN)`,
+  computed in integers (log2 in Q12 via table). Each doubling of dt costs an
+  equal velocity step, so medium and hard hits spread instead of clipping.
   Per pad: `TS_IDLE`, `TS_ARMED` (T1 crossed), `TS_HELD`. ARMED reaching T2
   sends Note On. ARMED for `TS_TIMEOUT_MS` while still above T1 sends Note On
   with the timeout's velocity (a very slow gentle press still sounds). ARMED
@@ -150,8 +153,8 @@ press event, then squeezes it to 7 bits with its own curve. So:
   gives one Note On. Aim is the softest playing; it may be weaker at the loud
   end, which the player accepts.
   Defaults (12-bit): `TS_T1 = 120`, `TS_T2 = 480`, `TS_REL = 80`,
-  `TS_TIMEOUT_MS = 80`, `TS_REL_TICKS = 3`, `TS_DT_FAST = 1 ms`,
-  `TS_VEL_MIN = 0x0200`; must hold `TS_REL < TS_T1 < TS_T2`.
+  `TS_TIMEOUT_MS = 80`, `TS_REL_TICKS = 3`, `TS_DT_MIN_Q8 = 23`,
+  `TS_DT_MAX_Q8 = 1024`, `TS_VEL_MIN = 0x0200`; must hold `TS_REL < TS_T1 < TS_T2`.
   The engine runs in the main loop, from the pad engine's `pe_poll`, once per
   new millisecond (not in the timer interrupt). It is fed the absolute ms
   counter; the main loop may skip milliseconds, so crossing times are

@@ -52,14 +52,31 @@ static void test_ts_velocity_curve(void)
 {
 	u32 d;
 	u16 last = 0xFFFF;
-	CHECK_EQ(ts_velocity(256), 0xFFFF);
-	CHECK_EQ(ts_velocity(128), 0xFFFF);
-	CHECK_EQ(ts_velocity(512), 0x7FFF);
-	CHECK_EQ(ts_velocity(80 * 256), 0x0333);
-	CHECK_EQ(ts_velocity(1000 * 256), TS_VEL_MIN);
+	/* endpoints and clamps */
 	CHECK_EQ(ts_velocity(0), 0xFFFF);
+	CHECK_EQ(ts_velocity(1), 0xFFFF);
+	CHECK_EQ(ts_velocity(TS_DT_MIN_Q8), 0xFFFF);
+	CHECK_EQ(ts_velocity(TS_DT_MAX_Q8), TS_VEL_MIN);
+	CHECK_EQ(ts_velocity(1678), TS_VEL_MIN);
+	CHECK_EQ(ts_velocity(1000 * 256), TS_VEL_MIN);
+	CHECK_EQ(ts_velocity(0xFFFFFFFFu), TS_VEL_MIN);
+	/* interior points vs offline reference (natural-log formula), +-100 */
+	CHECK(near(ts_velocity(46), 53662, 100));
+	CHECK(near(ts_velocity(100), 40360, 100));
+	CHECK(near(ts_velocity(128), 36132, 100));
+	CHECK(near(ts_velocity(256), 24258, 100));
+	CHECK(near(ts_velocity(512), 12385, 100));
+	CHECK(near(ts_velocity(559), 10881, 100));
+	CHECK(near(ts_velocity(1023), TS_VEL_MIN, 100));
+	/* strictly decreasing over MIN..MAX at coarse steps, never 0, non-increasing everywhere */
+	CHECK(ts_velocity(46) > ts_velocity(100));
+	CHECK(ts_velocity(100) > ts_velocity(256));
+	CHECK(ts_velocity(256) > ts_velocity(559));
+	CHECK(ts_velocity(559) > ts_velocity(1000));
 	for (d = 1; d <= 30000; d++) {
 		u16 v = ts_velocity(d);
+		CHECK(v != 0);
+		CHECK(v >= TS_VEL_MIN);
 		if (v > last) {
 			CHECK(v <= last);
 			break;
@@ -67,6 +84,7 @@ static void test_ts_velocity_curve(void)
 		last = v;
 	}
 }
+
 
 static void test_ts_cross_interp(void)
 {
@@ -143,8 +161,17 @@ static void test_ts_single_tick_hard_hit(void)
 	CHECK_EQ(g_r.n, 1);
 	CHECK_EQ(g_r.on[0], 1);
 	CHECK_EQ(g_r.vel[0], ts_velocity(((480 - 120) * 256) / 2000));
-	CHECK_EQ(g_r.vel[0], 0xFFFF);
+	CHECK(near(g_r.vel[0], 53662, 100));	/* dt = 46 */
 	CHECK_EQ(g_e.pad[0].state, TS_HELD);
+}
+
+static void test_ts_single_tick_max_hit(void)
+{
+	reset();
+	tick0(0);
+	tick0(4095);	/* dt = 22 < TS_DT_MIN_Q8 */
+	CHECK_EQ(g_r.n, 1);
+	CHECK_EQ(g_r.vel[0], 0xFFFF);
 }
 
 static void test_ts_timeout_gentle(void)
@@ -255,7 +282,7 @@ static void park_armed(void)
 static void test_ts_parked_then_hard_hit(void)
 {
 	park_armed();
-	tick0(2000);
+	tick0(4095);	/* dt < TS_DT_MIN_Q8 */
 	CHECK_EQ(g_r.n, 1);
 	CHECK_EQ(g_r.vel[0], 0xFFFF);
 }
@@ -270,7 +297,7 @@ static void test_ts_parked_then_medium_ramp(void)
 	tick0(900);
 	t2 = ts_cross_q8(g_now - 1, 1, 300, 900, TS_T2);
 	CHECK_EQ(g_r.n, 1);
-	CHECK(g_r.vel[0] != 0x0333);
+	CHECK(g_r.vel[0] != TS_VEL_MIN);
 	CHECK_EQ(g_r.vel[0], ts_velocity(t2 - t1));
 }
 
@@ -301,7 +328,7 @@ static void test_ts_same_ms_ignored(void)
 	memset(f, 0, sizeof f);
 	reset();
 	ts_tick(&g_e, f, 5, note, &g_r);	/* prime */
-	f[0] = 2000;
+	f[0] = 4095;
 	ts_tick(&g_e, f, 5, note, &g_r);	/* same ms: not processed */
 	CHECK_EQ(g_r.n, 0);
 	CHECK_EQ(g_e.pad[0].state, TS_IDLE);
@@ -320,6 +347,7 @@ void test_twostage_all(void)
 	RUN(test_ts_slow_press);
 	RUN(test_ts_slow_press_across_wrap);
 	RUN(test_ts_single_tick_hard_hit);
+	RUN(test_ts_single_tick_max_hit);
 	RUN(test_ts_timeout_gentle);
 	RUN(test_ts_brush_silent);
 	RUN(test_ts_release_debounce);
