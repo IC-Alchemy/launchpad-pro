@@ -1,4 +1,5 @@
 #include "ump.h"
+#include "ci/midi_ci.h"
 #include "platform/platform.h"
 
 #define ST_EP_DISCOVERY 0x000
@@ -23,7 +24,7 @@ static const char EP_NAME[] = "Launchpad Pro MIDI 2.0";
 static const char *const FB_NAMES[FB_COUNT] = {"Standalone Port", "MIDI Port"};
 /* word0 low 16 bits: active | FB number, then UI hint / MIDI 1.0 / direction. */
 static const uint16_t FB_WORD0[FB_COUNT] = {0x8033, 0x813B};
-static const uint32_t FB_WORD1[FB_COUNT] = {0x00010000u, 0x01010000u};
+static const uint32_t FB_WORD1[FB_COUNT] = {0x00010000u | (MIDI_CI_VERSION << 8), 0x01010000u};
 
 static uint8_t g_protocol = UMP_PROTO_MIDI2;
 static void (*g_hook)(uint8_t old_proto);
@@ -122,6 +123,14 @@ static void endpoint_discovery(const uint32_t msg[4])
 		send_config_notify(0);
 }
 
+int ump_stream_notify_function_block(uint8_t block)
+{
+	if (block >= FB_COUNT)
+		return -1;
+	uint32_t m[4] = {head(0, ST_FB_INFO, FB_WORD0[block]), FB_WORD1[block], 0, 0};
+	return ump_tx_push(UMP_TX_CONTROL, m, 4);
+}
+
 static void fb_discovery(const uint32_t msg[4])
 {
 	uint8_t fb = (uint8_t)(msg[0] >> 8);
@@ -129,10 +138,8 @@ static void fb_discovery(const uint32_t msg[4])
 	for (uint8_t i = 0; i < FB_COUNT; i++) {
 		if (fb != 0xFF && fb != i)
 			continue;
-		if (filter & 0x01) {
-			uint32_t m[4] = {head(0, ST_FB_INFO, FB_WORD0[i]), FB_WORD1[i], 0, 0};
-			push4(m);
-		}
+		if (filter & 0x01)
+			ump_stream_notify_function_block(i);
 		if (filter & 0x02)
 			push_text(ST_FB_NAME, i, FB_NAMES[i]);
 	}

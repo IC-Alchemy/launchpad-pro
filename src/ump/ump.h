@@ -35,8 +35,10 @@ uint16_t ump_sysex7_pack(uint32_t *out, uint16_t max_words, uint8_t group, const
 void ump_sysex7_packet(uint32_t out[2], uint8_t group, const uint8_t *payload, uint16_t len,
                        uint16_t p, uint16_t packets);
 
+#define UMP_SYSEX7_BUFFER_BYTES 320
+
 struct ump_sysex7_rx {
-	uint8_t buf[320];
+	uint8_t buf[UMP_SYSEX7_BUFFER_BYTES];
 	uint16_t len;
 	uint8_t active;
 };
@@ -95,6 +97,8 @@ void ump_stream_set_protocol_hook(void (*fn)(uint8_t old_proto));
 /* Handles one MT 0xF message, queuing replies (UMP_TX_CONTROL).
  * Returns 1 if the protocol changed. */
 int ump_stream_handle(const uint32_t msg[4]);
+/* 0 if queued, -1 if the control ring is full. */
+int ump_stream_notify_function_block(uint8_t block);
 
 /* ---- RX section: UMP words from USB EP1 OUT -> app callbacks ---- */
 

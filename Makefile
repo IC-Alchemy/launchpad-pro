@@ -6,6 +6,7 @@ SOURCES += src/app.c
 
 # firmware-only sources (USB MIDI 2.0 transport); not part of the simulator
 FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c src/scales/*.c src/instrument/*.c)
+CI_SOURCES = src/ci/midi_ci.cpp
 
 INCLUDES += -Iinclude -Isrc -I
 
@@ -15,7 +16,7 @@ ORIG_LIB = lib/launchpad_pro.a
 LIB = $(BUILDDIR)/launchpad_pro_trimmed.a
 LIB_WORK = $(BUILDDIR)/lib_trim
 
-OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES))))
+OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES) $(CI_SOURCES))))
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
 SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
@@ -28,6 +29,7 @@ HEX = $(BUILDDIR)/launchpad_pro.hex
 HEXTOSYX = $(BUILDDIR)/hextosyx
 SIMULATOR = $(BUILDDIR)/simulator
 TEST_BIN = $(BUILDDIR)/tests/run_tests
+TEST_CI_OBJECT = $(BUILDDIR)/tests/midi_ci.o
 
 # host unit tests: later tasks append their files to TEST_SOURCES
 TEST_SOURCES += tests/run_tests.c tests/test_harness.c
@@ -48,12 +50,14 @@ TEST_SOURCES += tests/test_pads.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
+CI_HEADERS = $(wildcard src/ci/*.h src/ci/third_party/microsoft/*.h)
 
 # tools
 # -include cstdint fixes the pinned libintelhex header under modern g++
 HOST_GPP = g++ -include cstdint
 HOST_GCC = gcc
 CC = arm-none-eabi-gcc
+CXX = arm-none-eabi-g++
 LD = arm-none-eabi-gcc
 OBJCOPY = arm-none-eabi-objcopy
 AR = arm-none-eabi-ar
@@ -63,6 +67,8 @@ CFLAGS  = -Os -Wall -I.\
 -fsigned-char  -DSTM32F10X_MD -DUSE_STDPERIPH_DRIVER -DHSE_VALUE=6000000UL \
 -DCMSIS -DUSE_GLOBAL_CONFIG -ffunction-sections -std=c99  -mlittle-endian \
 $(INCLUDES) -o
+
+CI_CXXFLAGS = -std=c++17 -fno-exceptions -fno-rtti -Wall -Iinclude -Isrc
 
 LDSCRIPT = stm32_flash.ld
 
@@ -111,6 +117,10 @@ $(BUILDDIR)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) -c $(CFLAGS) -MMD -o $@ $<
 
+$(BUILDDIR)/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CI_CXXFLAGS) -Os -mcpu=cortex-m3 -mthumb -ffunction-sections -fdata-sections -MMD -c $< -o $@
+
 submodules:
 	@test -f $(TOOLS)/libintelhex/include/intelhex.h || { echo "run: git submodule update --init"; exit 1; }
 
@@ -123,9 +133,13 @@ $(GOLDEN_DESC): lib/launchpad_pro.a
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-$(TEST_BIN): $(GOLDEN_DESC) $(TEST_SOURCES) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
+$(TEST_CI_OBJECT): $(CI_SOURCES) $(CI_HEADERS) src/platform/platform.h src/ump/ump.h
 	mkdir -p $(dir $@)
-	$(HOST_GCC) $(TEST_CFLAGS) $(TEST_SOURCES) -o $@
+	$(HOST_GPP) $(CI_CXXFLAGS) -Werror -c $< -o $@
+
+$(TEST_BIN): $(GOLDEN_DESC) $(TEST_SOURCES) $(TEST_CI_OBJECT) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
+	mkdir -p $(dir $@)
+	$(HOST_GCC) $(TEST_CFLAGS) $(TEST_SOURCES) $(TEST_CI_OBJECT) -o $@
 
 .PHONY: all test submodules clean
 .DELETE_ON_ERROR:

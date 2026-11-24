@@ -1,4 +1,5 @@
 #include "ump/ump.h"
+#include "ci/midi_ci.h"
 #include "platform/irq.h"
 #include "app.h"
 
@@ -18,6 +19,7 @@ static uint32_t msg[4];
 static uint8_t have;
 static uint8_t need;
 static struct ump_sysex7_rx sysex[2];
+static struct midi_ci_reply ci_reply;
 
 void ump_rx_reset(void)
 {
@@ -78,11 +80,29 @@ static void dispatch(void)
 	} else if (mt == 3) {
 		struct ump_sysex7_rx *rx = &sysex[group];
 		if (ump_sysex7_rx_feed(rx, msg) == 1) {
-			/* stage 3: MIDI-CI intercept */
-			app_sysex_event(group, rx->buf, rx->len);
+			if (group != USBSTANDALONE || !midi_ci_receive(rx->buf, rx->len, &ci_reply))
+				app_sysex_event(group, rx->buf, rx->len);
 			ump_sysex7_rx_reset(rx);
 		}
 	}
+}
+
+/* Runs under the RX epoch lock. A blocked reply stays pending until USB IN
+ * drains the control ring. This also orders a collision's Invalidate before
+ * the Function Block notification and keeps alt changes from leaking a reply. */
+static int queue_ci_reply(void)
+{
+	if (ci_reply.len) {
+		if (ump_tx_push_sysex7(USBSTANDALONE, ci_reply.data, ci_reply.len) != 0)
+			return 0;
+		ci_reply.len = 0;
+	}
+	if (ci_reply.muid_changed) {
+		if (ump_stream_notify_function_block(0) != 0)
+			return 0;
+		ci_reply.muid_changed = 0;
+	}
+	return 1;
 }
 
 void ump_rx_poll(void)
@@ -94,6 +114,10 @@ void ump_rx_poll(void)
 		uint32_t w = 0;
 		uint16_t ep = epoch;
 		int got = (h != t);
+		if (ep == seen_epoch && !queue_ci_reply()) {
+			irq_restore(s);
+			return;
+		}
 		if (got) {
 			w = ring[t % UMP_RX_WORDS];
 			tail = (uint16_t)(t + 1);
@@ -105,6 +129,8 @@ void ump_rx_poll(void)
 			need = 0;
 			ump_sysex7_rx_reset(&sysex[0]);
 			ump_sysex7_rx_reset(&sysex[1]);
+			ci_reply.len = 0;
+			ci_reply.muid_changed = 0;
 		}
 		if (!got)
 			return;

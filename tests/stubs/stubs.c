@@ -18,6 +18,13 @@ void platform_product_instance_id(char out[25])
 	out[i] = 0;
 }
 
+void platform_start_muid_entropy(void) {}
+
+uint32_t platform_muid_entropy(void)
+{
+	return 0x12345678u;
+}
+
 struct stub_midi_ev stub_midi_log[64];
 int stub_midi_n;
 int stub_midi_total;

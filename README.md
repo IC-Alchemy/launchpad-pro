@@ -18,11 +18,10 @@ Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launc
 | 1 | USB MIDI 2.0 transport: new descriptors (alt 0 MIDI 1.0, alt 1 UMP), Group Terminal Blocks, UMP stream discovery, DIN bridge | **Done, tested on hardware.** Results in `docs/checkpoint-1-results.md`. Three checks (5b, 6a, 6c) were deferred to stage 4. |
 | 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
 | 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
-| 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Not started.** `src/ci/` does not exist yet; `src/ump/ump_rx.c` has a placeholder hook for it. |
+| 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery and Endpoint Inquiry implemented and host-tested.** Property Exchange is pending. |
 | 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
 
-Current image size: about 30 KB of the 101 KB app flash region (about 70 KB
-free), and about 12.3 KB of the 20 KB RAM. `make` prints the exact flash margin.
+The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash margin.
 
 ## What the firmware does now
 
@@ -58,9 +57,26 @@ free), and about 12.3 KB of the 20 KB RAM. `make` prints the exact flash margin.
 The full pad map of the menu and every check to run on the hardware are in
 `docs/checkpoint-2-instrument.md`.
 
+## MIDI-CI with MIDI2Sound
+
+The Standalone Function Block supports MIDI-CI 1.2 over USB UMP. It answers
+Discovery and Product Instance ID inquiries and handles MUID invalidation,
+collisions, and negative acknowledgments. Discovery advertises zero optional
+capability categories. The Windows UI calls UMP group 0 **Group 1**.
+
+On Windows, select the Launchpad endpoint in MIDI2Sound using Windows MIDI
+Services, open **MIDI-CI**, and click **DISCOVER**. Expect one reply on Group 1
+with Function Block 0, MIDI-CI format 2, and a Product Instance ID matching the
+UMP endpoint. In Live MIDI, press and release a pad and vary its pressure to
+check MIDI 2.0 note and pressure messages. The MIDI2Sound CLI can also run
+`midi_monitor_cli --ci-discover --endpoint Launchpad --all-groups`.
+
+The firmware reuses the same [MIT-licensed Microsoft MIDI-CI headers](src/ci/third_party/microsoft/README.md)
+as MIDI2Sound.
+
 ## Building
 
-You need the ARM GCC toolchain, a host `gcc`/`g++`, `make`, and the
+You need an ARM GCC toolchain with C++17, a host `gcc`/`g++`, `make`, and the
 `tools/libintelhex` git submodule.
 
 ### Linux (Debian / Ubuntu), or Windows via WSL
@@ -82,7 +98,7 @@ This is the setup that is checked: Ubuntu 24.04 with `arm-none-eabi-gcc`
 test, converts the image to `build/launchpad_pro.syx`, and runs
 `tools/check_image.sh` to confirm the image fits below `0x0801F800` (the end of
 the app flash region). It fails if the image does not fit. `make test` runs
-the host unit tests (208 at present) and should end with `0 failures`.
+the host unit tests and should end with `0 failures`.
 `make clean` removes `build/`.
 
 ### macOS

@@ -96,7 +96,7 @@ static void test_fb_discovery(void)
 {
 	uint32_t all[4] = {0xF010FF03u, 0, 0, 0};             /* all blocks, info+name */
 	fake_tx_clear(); ump_stream_handle(all);
-	CHECK_EQ(fake_tx_word(0,0), 0xF0118033u); CHECK_EQ(fake_tx_word(0,1), 0x00010000u);
+	CHECK_EQ(fake_tx_word(0,0), 0xF0118033u); CHECK_EQ(fake_tx_word(0,1), 0x00010200u);
 	/* FB0 name: 15 bytes -> start + end packets; then FB1 info, FB1 name (complete) */
 	CHECK_EQ(fake_tx_msg_count(), 5);
 	CHECK_EQ(fake_tx_word(3,0), 0xF011813Bu); CHECK_EQ(fake_tx_word(3,1), 0x01010000u);
