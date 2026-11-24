@@ -3,7 +3,7 @@
 #include "scales/scales.h"
 #include <string.h>
 
-#define FIELDS 11
+#define FIELDS 12
 
 static struct settings g_saved;
 static uint32_t g_touch;
@@ -21,6 +21,7 @@ void settings_defaults(struct settings *s)
 	s->pressure_threshold = THRESH_MED;
 	s->din_mirror = 0;
 	s->channel = 0;
+	s->pressure_smoothing = SMOOTH_LIGHT;
 }
 
 uint8_t settings_valid(const struct settings *s)
@@ -29,7 +30,8 @@ uint8_t settings_valid(const struct settings *s)
 	       s->layout < LAYOUT_COUNT && s->absolute_root <= 1 &&
 	       s->din_mirror <= 1 && s->velocity_mode < 4 &&
 	       s->velocity_curve < 3 && s->pressure_mode < 3 &&
-	       s->pressure_threshold < 3 && s->channel < 16;
+	       s->pressure_threshold < 3 && s->channel < 16 &&
+	       s->pressure_smoothing < 4;
 }
 
 static void to_bytes(const struct settings *s, uint8_t *b)
@@ -45,6 +47,7 @@ static void to_bytes(const struct settings *s, uint8_t *b)
 	b[8] = s->pressure_threshold;
 	b[9] = s->din_mirror;
 	b[10] = s->channel;
+	b[11] = s->pressure_smoothing;
 }
 
 void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
@@ -56,7 +59,7 @@ void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
 	out[1] = 'P';
 	out[2] = 'M';
 	out[3] = '2';
-	out[4] = 1;
+	out[4] = 2;
 	to_bytes(s, out + 5);
 	for (i = 0; i < SETTINGS_RECORD_LEN - 1; i++)
 		sum = (uint8_t)(sum + out[i]);
@@ -67,11 +70,17 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 {
 	struct settings t;
 	uint8_t sum = 0;
-	uint8_t i;
+	uint8_t i, len;
 
-	if (in[0] != 'L' || in[1] != 'P' || in[2] != 'M' || in[3] != '2' || in[4] != 1)
+	if (in[0] != 'L' || in[1] != 'P' || in[2] != 'M' || in[3] != '2')
 		return 0;
-	for (i = 0; i < SETTINGS_RECORD_LEN; i++)
+	if (in[4] == 2)
+		len = SETTINGS_RECORD_LEN;
+	else if (in[4] == 1)
+		len = SETTINGS_RECORD_V1_LEN;
+	else
+		return 0;
+	for (i = 0; i < len; i++)
 		sum = (uint8_t)(sum + in[i]);
 	if (sum != 0)
 		return 0;
@@ -86,6 +95,7 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 	t.pressure_threshold = in[13];
 	t.din_mirror = in[14];
 	t.channel = in[15];
+	t.pressure_smoothing = len == SETTINGS_RECORD_LEN ? in[16] : SMOOTH_LIGHT;
 	if (!settings_valid(&t))
 		return 0;
 	*s = t;

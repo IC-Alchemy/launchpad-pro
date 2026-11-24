@@ -71,7 +71,9 @@ white to show the page):
 | 4, 3, 2 | 41 to 48, 31 to 38, 21 to 28 | Scales 1 to 24 (Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Diminished; Whole-half, Whole Tone, Minor Blues, Minor Pentatonic, Major Pentatonic, Harmonic Minor, Melodic Minor, Super Locrian; Bhairav, Hungarian Minor, Minor Gypsy, Hirojoshi, In-Sen, Iwato, Kumoi, Pelog) | blue |
 | 1 | 11 | Scale 25 (Spanish) | blue |
 
-Options page (button 96), all white:
+Options page (button 96), mostly white with a light hue per section (selected
+bright, others dim): velocity rows 7 and 8 warm, aftertouch rows 3, 5 and 6 cool
+blue, MIDI routing rows 1, 2 and 4 soft green; the page buttons stay pure white:
 
 | Row | Pads | What |
 |---|---|---|
@@ -79,9 +81,18 @@ Options page (button 96), all white:
 | 6 | 61, 62, 63 | Pressure: Poly, Channel, Off |
 | 7 | 71, 72, 73 | Velocity curve: Soft, Linear, Hard |
 | 8 | 81, 82, 83, 84 | Velocity mode: Peak-window, Zero-latency, Two-stage, Fixed |
+| 3 | 31, 32, 33, 34 | Aftertouch smoothing: None, Light, Medium, Heavy |
 | 4 | 41, 42 | DIN mirror: Off, On (also sends the pad notes and pressure to DIN) |
 | 2 | 21 to 28 | MIDI channel 1 to 8 |
 | 1 | 11 to 18 | MIDI channel 9 to 16 |
+
+Aftertouch smoothing (row 3) is a low-pass on each held pad's pressure before
+it is sent, to cut jitter, for poly and channel pressure alike: None barely
+filters (about 2 ms to settle), Light is the previous behaviour and the
+default (about 30 ms), Medium about 125 ms, Heavy about 250 ms to settle to
+within 2% of a step. More smoothing is steadier but follows quick pressure
+changes later. It is saved with the other settings (settings record version 2;
+a version 1 record from the earlier image still loads, with Light).
 
 Velocity modes: Peak-window waits 3 ms after the strike and sends the highest
 raw 12-bit reading in that window (the most accurate, full sensor resolution,
@@ -309,6 +320,7 @@ Fill in "Result" and "Notes". "Expected" is what I predict.
 | 5 | Minor Pentatonic | Only 5 pitch classes | | |
 | 6 | Velocity: peak-window, zero-latency, two-stage, fixed, curves | Soft, medium, hard separate on both pads; Fixed = 0xFFFF | | |
 | 7 | Poly pressure smoothness | Continuous, not 128 steps | | |
+| 7b | Aftertouch smoothing (Options row 3) | Heavy: slow smooth swell (about 250 ms to settle), None: fast but jittery; Light is the default; survives unplug | | |
 | 8 | Channel pressure and Off | Returns to 0 on release; Off sends none | | |
 | 9 | DIN mirror | Notes and pressure on DIN, 7-bit; steady hold sends only occasional pressure | | |
 | 10 | Channel 10 | Seen in the monitor | | |

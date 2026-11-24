@@ -397,6 +397,8 @@ bright):
 - Row 4: pressure threshold — Low / Med / High.
 - Row 5: DIN mirror — Off / On (sends notes and pressure to the DIN out as
   MIDI 1.0).
+- Pressure smoothing — None / Light / Medium / Heavy (one-pole low-pass per
+  held pad at 1 kHz, coefficient 1/2, 1/8, 1/32, 1/64; Light is the default).
 - Rows 7–8: MIDI channel 1–16.
 - Status (read-only): Setup LED is green when the Standalone port is using
   MIDI 2.0. It is amber for MIDI 1.0, including MIDI 1.0 protocol in alt 1.
@@ -405,7 +407,9 @@ bright):
 
 - Settings (scale, root, octave, layout, absolute root, all options) use a
   fixed-width record in the HAL's 1 KiB user flash page, with a magic value,
-  version and checksum. Validate field ranges before use. Blank flash,
+  version and checksum (version 2 added the pressure smoothing byte; a
+  version 1 record still loads, with the default smoothing). Validate field
+  ranges before use. Blank flash,
   unsupported versions and incomplete or invalid records load defaults.
 - Close the menu immediately and defer the flash write until a short quiet
   period with no active notes. Compare settings with the last saved record
