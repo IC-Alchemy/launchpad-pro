@@ -2,6 +2,7 @@
 #include "platform/irq.h"
 #include "app.h"
 #include "midici/midici.h"
+#include "midici/responder.h"
 
 static uint32_t ring[UMP_RX_WORDS];
 static volatile uint16_t head; /* written by push (interrupt) */
@@ -38,6 +39,7 @@ void ump_rx_reset(void)
 	isr_have = 0;
 	irq_restore(s);
 	midici_reset();
+	midici_responder_reset();
 }
 
 uint16_t ump_rx_free_words(void)
@@ -110,6 +112,7 @@ static void dispatch(void)
 void ump_rx_poll(void)
 {
 	midici_poll();
+	midici_responder_poll();
 	for (;;) {
 		uint32_t s = irq_save();
 		uint16_t t = tail;

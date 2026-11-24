@@ -13,8 +13,10 @@
 #include "usb/usb_compat.h"
 #include "platform/lib_private.h"
 #include "platform/irq.h"
+#include "platform/platform.h"
 #include "ump/ump.h"
 #include "midici/midici.h"
+#include "midici/responder.h"
 #include "midi2.h"
 #include <string.h>
 
@@ -227,6 +229,7 @@ void hal_send_channel_pressure2(u8 port, u8 ch, u32 value)
 void __wrap_midi_parsers_init(void)
 {
 	__real_midi_parsers_init();
+	midici_responder_init();
 	memcpy(parser_snapshot, USBParserToDev, sizeof parser_snapshot);
 	parser_snapshot_valid = 1;
 	ump_stream_set_protocol_hook(midi2_protocol_changing);

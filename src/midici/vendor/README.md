@@ -8,6 +8,10 @@
   - `MidiCiMessage.h` - MIDI-CI message parse/build (`Parse`, `Build*`)
   - `MidiCiResponder.h` - allocation-free `Responder` state machine
 - Local modifications: none. Do not edit these two files; re-vendor from upstream instead.
+- Reply version: upstream `Responder` answers in the requester's message version, but M2-101
+  says a MUID uses one outgoing format. Rather than patching `ReplyVersionFor`,
+  `../responder.cpp` sets `ParsedMessage::VersionFormat` to `MIDI_CI_VERSION` (0x02) after
+  parsing and before `ProcessMessage`. NAKs for an unsupported version are built there too.
 
 ## Support files (ours, not upstream)
 

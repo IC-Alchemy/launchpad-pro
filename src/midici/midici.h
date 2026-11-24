@@ -46,6 +46,9 @@ void midici_poll(void);
  * the given UMP group, all or nothing. 0, or -1 if CiTxQueue has no room. */
 int midici_send_sysex(uint8_t group, const uint8_t *data, uint16_t len);
 
+/* Packets still waiting in CiTxQueue (main loop). */
+uint16_t midici_tx_pending(void);
+
 /* USB TX path: moves up to max_packets queued packets into the UMP TX control
  * ring (stopping early if it has no room). Returns the number moved. */
 uint8_t midici_tx_drain(uint8_t max_packets);

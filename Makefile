@@ -9,7 +9,7 @@ FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/midici/*.c
 
 # MIDI-CI: Microsoft's header-only responder (src/midici/vendor) is C++17; the
 # check TU compiles it with the firmware flags (no exceptions, no RTTI, no libstdc++)
-FW_CXX_SOURCES += src/midici/vendor/ci_headers_check.cpp
+FW_CXX_SOURCES += src/midici/vendor/ci_headers_check.cpp src/midici/responder.cpp
 
 INCLUDES += -Iinclude -Isrc
 
@@ -47,6 +47,7 @@ HEX = $(BUILDDIR)/launchpad_pro.hex
 HEXTOSYX = $(BUILDDIR)/hextosyx$(EXE)
 SIMULATOR = $(BUILDDIR)/simulator$(EXE)
 TEST_BIN = $(BUILDDIR)/tests/run_tests$(EXE)
+TEST_CI_OBJECT = $(BUILDDIR)/tests/responder.o
 
 # host unit tests: later tasks append their files to TEST_SOURCES
 TEST_SOURCES += tests/run_tests.c tests/test_harness.c
@@ -67,6 +68,7 @@ TEST_SOURCES += tests/test_pads.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
 TEST_SOURCES += tests/test_midici.c src/midici/midici.c src/midici/ci_queue.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
+CI_HEADERS = $(wildcard src/midici/*.h src/midici/vendor/*.h)
 TEST_CFLAGS = -std=c99 -Wall -Werror $(HOST_PLATFORM_CFLAGS) -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
 # tools
@@ -164,9 +166,14 @@ $(GOLDEN_DESC): $(ORIG_LIB)
 test: $(TEST_BIN)
 	$(TEST_BIN)
 
-$(TEST_BIN): $(GOLDEN_DESC) $(TEST_SOURCES) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
+# the MIDI-CI responder is C++17 (Microsoft's headers); link it into the C test binary
+$(TEST_CI_OBJECT): src/midici/responder.cpp $(CI_HEADERS) src/platform/platform.h src/ump/ump.h
 	mkdir -p $(dir $@)
-	$(HOST_GCC) $(TEST_CFLAGS) $(TEST_SOURCES) -o $@
+	$(HOST_GPP) -std=c++17 -Wall -Werror -include src/midici/vendor/sal_shim.h -Iinclude -Isrc -c $< -o $@
+
+$(TEST_BIN): $(GOLDEN_DESC) $(TEST_SOURCES) $(TEST_CI_OBJECT) $(wildcard tests/*.h tests/stubs/*.h include/*.h src/*/*.h)
+	mkdir -p $(dir $@)
+	$(HOST_GCC) $(TEST_CFLAGS) $(TEST_SOURCES) $(TEST_CI_OBJECT) -o $@
 
 .PHONY: all elf hex simulator test submodules clean
 .DELETE_ON_ERROR:

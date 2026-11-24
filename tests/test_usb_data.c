@@ -2,6 +2,7 @@
 #include "stubs/stubs.h"
 #include "usb/usb_compat.h"
 #include "usb/usb_midi2.h"
+#include "midici/midici.h"
 #include "platform/lib_private.h"
 #include "ump/ump.h"
 #include "midi2.h"
@@ -77,6 +78,188 @@ static uint16_t host_in(uint32_t out[16])
 		         ((uint32_t)stub.last_tx[4 * i + 2] << 16) |
 		         ((uint32_t)stub.last_tx[4 * i + 3] << 24);
 	return (uint16_t)(stub.last_tx_len / 4);
+}
+
+/* MIDI-CI frames include F0/F7 here, but the UMP codec strips them on the wire. */
+static void host_out_sysex(uint8_t group, const uint8_t *data, uint16_t len)
+{
+	uint32_t words[UMP_RX_WORDS];
+	uint16_t count = ump_sysex7_pack(words, UMP_RX_WORDS, group, data, len);
+	CHECK(count != 0);
+	for (uint16_t i = 0; i < count; i += 16) {
+		uint16_t remaining = (uint16_t)(count - i);
+		host_out(words + i, remaining < 16 ? remaining : 16);
+		__wrap_midi_parsers_poll();
+	}
+}
+
+/* reply bytes already complete when the Function Block alert arrived */
+static uint16_t alert_after_len;
+
+static void host_in_ci(struct ump_sysex7_rx *reply, int expected_alerts)
+{
+	uint32_t words[16];
+	int alerts = 0;
+	ump_sysex7_rx_reset(reply);
+	for (uint16_t count;;) {
+		if ((count = host_in(words)) == 0) {
+			__wrap_midi_parsers_poll();	/* one more main-loop pass, as on hardware */
+			if ((count = host_in(words)) == 0)
+				break;
+		}
+		for (uint16_t i = 0; i < count; i += ump_word_count(words[i])) {
+			if (words[i] >> 28 == 3) {
+				CHECK_EQ((words[i] >> 24) & 0xF, 0);
+				CHECK(ump_sysex7_rx_feed(reply, words + i) >= 0);
+			} else if (words[i] == 0xF0118033u) {
+				CHECK_EQ(words[i + 1], 0x00010200u);
+				CHECK_EQ(reply->active, 0);
+				alert_after_len = reply->len;
+				alerts++;
+			}
+		}
+	}
+	CHECK_EQ(alerts, expected_alerts);
+	CHECK_EQ(reply->active, 0);
+}
+
+static const uint8_t ci_discovery[] = {
+	0xF0, 0x7E, 0x7F, 0x0D, 0x70, 0x02, 1, 2, 3, 4, 0x7F, 0x7F, 0x7F, 0x7F,
+	0x7D, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 8, 0, 32, 0, 0, 7, 0xF7
+};
+
+static void ci_discover(struct ump_sysex7_rx *reply)
+{
+	host_out_sysex(0, ci_discovery, sizeof(ci_discovery));
+	host_in_ci(reply, 0);
+	CHECK_EQ(reply->len, 33);
+	CHECK_EQ(reply->buf[4], 0x71);
+}
+
+static void test_ci_discovery_endpoint_and_version(void)
+{
+	struct ump_sysex7_rx reply;
+	uint8_t inquiry[] = {0xF0, 0x7E, 0x7F, 0x0D, 0x72, 2, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0xF7};
+	uint8_t legacy[sizeof(ci_discovery) - 1];
+	enter_alt1();
+	ci_discover(&reply);
+	CHECK_MEM(reply.buf + 10, ci_discovery + 6, 4);
+	const uint8_t identity[] = {0, 0x20, 0x29, 0x51, 0, 0, 0, 0, 1, 0, 0};
+	CHECK_MEM(reply.buf + 14, identity, sizeof(identity));
+	CHECK_EQ(reply.buf[25], 0); /* no Profile, PE or Process Inquiry */
+	CHECK_EQ(reply.buf[26] + (reply.buf[27] << 7), CI_REASSEMBLY_BYTES);
+	CHECK_EQ(reply.buf[30], 7); /* initiator Output Path ID */
+	CHECK_EQ(reply.buf[31], 0); /* Standalone Function Block */
+	memcpy(inquiry + 10, reply.buf + 6, 4);
+	host_out_sysex(0, inquiry, sizeof(inquiry));
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.len, 26);
+	CHECK_EQ(reply.buf[4], 0x73);
+	CHECK_EQ(reply.buf[15], 8);
+	CHECK_EQ(reply.buf[16], 0);
+	CHECK_MEM(reply.buf + 17, "TEST0001", 8);
+	CHECK_EQ(stub_sysex_calls, 0);
+
+	memcpy(legacy, ci_discovery, sizeof(legacy) - 1);
+	legacy[5] = 1;
+	legacy[sizeof(legacy) - 1] = 0xF7;
+	host_out_sysex(0, legacy, sizeof(legacy));
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.len, 33);
+	CHECK_EQ(reply.buf[5], 2); /* responder keeps its declared format */
+	CHECK_EQ(reply.buf[30], 0);
+	CHECK_MEM(reply.buf + 6, inquiry + 10, 4);
+
+	host_out_sysex(1, ci_discovery, sizeof(ci_discovery));
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.len, 0);
+	CHECK_EQ(stub_sysex_port, USBMIDI);
+	CHECK_EQ(stub_sysex_calls, 1);
+}
+
+static void test_ci_nak_address_and_sysex_limit(void)
+{
+	struct ump_sysex7_rx reply;
+	uint8_t inquiry[128] = {0xF0, 0x7E, 0x7F, 0x0D, 0x30, 2, 1, 2, 3, 4};
+	enter_alt1();
+	ci_discover(&reply);
+	memcpy(inquiry + 10, reply.buf + 6, 4);
+	inquiry[sizeof(inquiry) - 1] = 0xF7;
+	host_out_sysex(0, inquiry, sizeof(inquiry));
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.len, 25);
+	CHECK_EQ(reply.buf[4], 0x7F);
+	CHECK_EQ(reply.buf[14], 0x30);
+	CHECK_EQ(reply.buf[15], 0x01);
+
+	inquiry[5] = 0x22; /* reserved version bits */
+	host_out_sysex(0, inquiry, sizeof(inquiry));
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.buf[5], 2);
+	CHECK_EQ(reply.buf[15], 0x02);
+
+	inquiry[5] = 2;
+	inquiry[4] = 0x72;
+	inquiry[14] = 0xF7; /* endpoint inquiry without a status byte */
+	host_out_sysex(0, inquiry, 15);
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.buf[15], 0x41);
+
+	inquiry[10] ^= 1; /* for a different MUID */
+	host_out_sysex(0, inquiry, 15);
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.len, 0);
+}
+
+static void test_ci_muid_replacement_and_collision(void)
+{
+	struct ump_sysex7_rx reply;
+	uint8_t invalidate[] = {0xF0, 0x7E, 0x7F, 0x0D, 0x7E, 2, 1, 2, 3, 4,
+		0x7F, 0x7F, 0x7F, 0x7F, 0, 0, 0, 0, 0xF7};
+	uint8_t collision[sizeof(ci_discovery)];
+	uint8_t replacement[4];
+	enter_alt1();
+	ci_discover(&reply);
+	memcpy(invalidate + 14, reply.buf + 6, 4);
+	host_out_sysex(0, invalidate, sizeof(invalidate));
+	host_in_ci(&reply, 1);
+	CHECK_EQ(reply.len, 0);
+	ci_discover(&reply);
+	CHECK(memcmp(reply.buf + 6, invalidate + 14, 4) != 0);
+
+	memcpy(collision, ci_discovery, sizeof(collision));
+	memcpy(collision + 6, reply.buf + 6, 4);
+	host_out_sysex(0, collision, sizeof(collision));
+	alert_after_len = 0;
+	host_in_ci(&reply, 1);
+	CHECK_EQ(reply.len, sizeof(invalidate));
+	CHECK_EQ(alert_after_len, sizeof(invalidate));	/* Invalidate first, then the alert */
+	CHECK_EQ(reply.buf[4], 0x7E);
+	CHECK_MEM(reply.buf + 14, collision + 6, 4);
+	CHECK(memcmp(reply.buf + 6, collision + 6, 4) != 0);
+	memcpy(replacement, reply.buf + 6, 4);
+	ci_discover(&reply);
+	CHECK_MEM(reply.buf + 6, replacement, 4);
+}
+
+static void test_ci_reply_retries_and_is_discarded_on_alt_change(void)
+{
+	struct ump_sysex7_rx reply;
+	const uint32_t filler[4] = {0xF0010000u, 0, 0, 0};
+	uint32_t packet[16];
+	enter_alt1();
+	while (ump_tx_push(UMP_TX_CONTROL, filler, 4) == 0) {}
+	host_out_sysex(0, ci_discovery, sizeof(ci_discovery));
+	/* the reply waits in CiTxQueue until USB IN frees the control ring, then arrives */
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.buf[4], 0x71);
+	CHECK_EQ(reply.len, 33);
+
+	while (ump_tx_push(UMP_TX_CONTROL, filler, 4) == 0) {}
+	host_out_sysex(0, ci_discovery, sizeof(ci_discovery));
+	enter_alt1();
+	__wrap_midi_parsers_poll();
+	CHECK_EQ(host_in(packet), 0);
 }
 
 /* ---- EP1 OUT / RX ---- */
@@ -716,6 +899,10 @@ static void test_sounding_vs_set_alt_interrupt(void)
 
 void test_usb_data_all(void)
 {
+	RUN(test_ci_discovery_endpoint_and_version);
+	RUN(test_ci_nak_address_and_sysex_limit);
+	RUN(test_ci_muid_replacement_and_collision);
+	RUN(test_ci_reply_retries_and_is_discarded_on_alt_change);
 	RUN(test_ep1_out_odd_length);
 	RUN(test_ep1_out_leaves_nak_until_poll);
 	RUN(test_backpressure_nak_until_space);
