@@ -93,18 +93,28 @@ static void host_out_sysex(uint8_t group, const uint8_t *data, uint16_t len)
 	}
 }
 
+/* reply bytes already complete when the Function Block alert arrived */
+static uint16_t alert_after_len;
+
 static void host_in_ci(struct ump_sysex7_rx *reply, int expected_alerts)
 {
 	uint32_t words[16];
 	int alerts = 0;
 	ump_sysex7_rx_reset(reply);
-	for (uint16_t count; (count = host_in(words)) != 0;) {
+	for (uint16_t count;;) {
+		if ((count = host_in(words)) == 0) {
+			__wrap_midi_parsers_poll();	/* one more main-loop pass, as on hardware */
+			if ((count = host_in(words)) == 0)
+				break;
+		}
 		for (uint16_t i = 0; i < count; i += ump_word_count(words[i])) {
 			if (words[i] >> 28 == 3) {
 				CHECK_EQ((words[i] >> 24) & 0xF, 0);
 				CHECK(ump_sysex7_rx_feed(reply, words + i) >= 0);
 			} else if (words[i] == 0xF0118033u) {
 				CHECK_EQ(words[i + 1], 0x00010200u);
+				CHECK_EQ(reply->active, 0);
+				alert_after_len = reply->len;
 				alerts++;
 			}
 		}
@@ -220,8 +230,10 @@ static void test_ci_muid_replacement_and_collision(void)
 	memcpy(collision, ci_discovery, sizeof(collision));
 	memcpy(collision + 6, reply.buf + 6, 4);
 	host_out_sysex(0, collision, sizeof(collision));
+	alert_after_len = 0;
 	host_in_ci(&reply, 1);
 	CHECK_EQ(reply.len, sizeof(invalidate));
+	CHECK_EQ(alert_after_len, sizeof(invalidate));	/* Invalidate first, then the alert */
 	CHECK_EQ(reply.buf[4], 0x7E);
 	CHECK_MEM(reply.buf + 14, collision + 6, 4);
 	CHECK(memcmp(reply.buf + 6, collision + 6, 4) != 0);

@@ -39,6 +39,7 @@ void ump_rx_reset(void)
 	isr_have = 0;
 	irq_restore(s);
 	midici_reset();
+	midici_responder_reset();
 }
 
 uint16_t ump_rx_free_words(void)

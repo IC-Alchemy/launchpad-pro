@@ -252,6 +252,11 @@ int midici_send_sysex(uint8_t group, const uint8_t *data, uint16_t len)
 	return 0;
 }
 
+uint16_t midici_tx_pending(void)
+{
+	return ci_queue_count(&ci_tx);
+}
+
 uint8_t midici_tx_drain(uint8_t max_packets)
 {
 	uint32_t pkt[2];

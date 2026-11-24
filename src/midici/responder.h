@@ -19,6 +19,9 @@ extern "C" {
 /* Registers the responder as the midici handler. Call once at startup. */
 void midici_responder_init(void);
 
+/* Drops a pending notification (alt setting change, USB reset). Interrupt-safe. */
+void midici_responder_reset(void);
+
 /* Main loop (from ump_rx_poll): retries a Function Block 0 notification that
  * could not be queued after the MUID changed. */
 void midici_responder_poll(void);

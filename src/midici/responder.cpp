@@ -14,10 +14,11 @@ namespace ms = WindowsMidiServicesCapabilityInquiry;
 namespace {
 
 constexpr uint8_t kStandaloneGroup = 0;
+constexpr uint8_t kMidiPortGroup = 1;
 
 ms::Responder responder;
 bool initialized;
-bool notify_pending;	/* Function Block 0 info must be re-sent: the MUID changed */
+volatile bool notify_pending;	/* Function Block 0 info must be re-sent: the MUID changed */
 
 uint32_t replace_muid(uint32_t previous)
 {
@@ -117,7 +118,7 @@ size_t respond(const uint8_t *payload, size_t len, uint8_t *out, size_t capacity
 
 void on_message(uint8_t group, const uint8_t *payload, uint16_t len)
 {
-	if (group != kStandaloneGroup) {
+	if (group == kMidiPortGroup) {
 		/* MIDI port: not ours to answer; the app (or a DIN bridge) sees it as plain SysEx. */
 		uint16_t cap = 0;
 		uint8_t *fwd = midici_reply_buffer(&cap);
@@ -130,6 +131,8 @@ void on_message(uint8_t group, const uint8_t *payload, uint16_t len)
 		}
 		return;
 	}
+	if (group != kStandaloneGroup)
+		return;	/* groups 2..15 have no Function Block; dropped like other SysEx there */
 	if (len < 4 || payload[0] != ms::UniversalSystemExclusiveId ||
 	    payload[2] != ms::SubId1CapabilityInquiry)
 		return;
@@ -142,7 +145,7 @@ void on_message(uint8_t group, const uint8_t *payload, uint16_t len)
 	if (bytes)
 		midici_send_sysex(group, out, static_cast<uint16_t>(bytes));
 	if (muid_changed)
-		notify_pending = true;	/* after the reply, so a collision's Invalidate goes first */
+		notify_pending = true;	/* sent once the reply has left CiTxQueue */
 	midici_responder_poll();
 }
 
@@ -153,8 +156,15 @@ extern "C" void midici_responder_init(void)
 	midici_set_handler(on_message);
 }
 
+extern "C" void midici_responder_reset(void)
+{
+	notify_pending = false;
+}
+
 extern "C" void midici_responder_poll(void)
 {
-	if (notify_pending && ump_stream_notify_function_block(0) == 0)
+	/* Wait for CiTxQueue to drain so a collision's Invalidate MUID reaches the
+	 * host before the Function Block notification that follows it. */
+	if (notify_pending && midici_tx_pending() == 0 && ump_stream_notify_function_block(0) == 0)
 		notify_pending = false;
 }
