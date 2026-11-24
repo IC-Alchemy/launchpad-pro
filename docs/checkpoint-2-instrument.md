@@ -71,7 +71,9 @@ white to show the page):
 | 4, 3, 2 | 41 to 48, 31 to 38, 21 to 28 | Scales 1 to 24 (Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Diminished; Whole-half, Whole Tone, Minor Blues, Minor Pentatonic, Major Pentatonic, Harmonic Minor, Melodic Minor, Super Locrian; Bhairav, Hungarian Minor, Minor Gypsy, Hirojoshi, In-Sen, Iwato, Kumoi, Pelog) | blue |
 | 1 | 11 | Scale 25 (Spanish) | blue |
 
-Options page (button 96), all white:
+Options page (button 96), mostly white with a light hue per section (selected
+bright, others dim): velocity rows 7 and 8 warm, aftertouch rows 3, 5 and 6 cool
+blue, MIDI routing rows 1, 2 and 4 soft green; the page buttons stay pure white:
 
 | Row | Pads | What |
 |---|---|---|
