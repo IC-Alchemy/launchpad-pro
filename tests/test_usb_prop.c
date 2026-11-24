@@ -5,6 +5,7 @@
 #include "usb/usb_midi2.h"
 #include "platform/lib_private.h"
 #include "ump/ump.h"
+#include "midici/midici.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -405,10 +406,11 @@ static void test_reset_mid_traffic(void)
 		CHECK_EQ(ump_tx_push_attack(note, 2), 0);
 	CHECK(ump_rx_free_words() == UMP_RX_WORDS);
 	ump_rx_push_words(sx_start, 2);				/* still queued at reset */
-	CHECK(ump_rx_free_words() < UMP_RX_WORDS);
+	CHECK(midici_rx_free_packets() < CI_RX_QUEUE_PACKETS);	/* SysEx7 waits in CiRxQueue */
 
 	Device_Property.Reset();				/* USB reset ISR */
 	CHECK_EQ(ump_rx_free_words(), UMP_RX_WORDS);
+	CHECK_EQ(midici_rx_free_packets(), CI_RX_QUEUE_PACKETS);
 	CHECK_EQ(ump_tx_fill_packet(pkt), 0);
 	CHECK_EQ(ump_tx_reserve_words(), 0);
 	CHECK_EQ(ump_stream_protocol(), UMP_PROTO_MIDI2);
