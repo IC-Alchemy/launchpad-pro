@@ -390,16 +390,20 @@ button is lit.
   octave red, layouts amber.
 
 *Options page* (one option per row, one pad per value, selected value
-bright):
-- Row 1: velocity mode — Peak-window / Zero-latency / Two-stage / Fixed.
-- Row 2: velocity curve — Soft / Linear / Hard.
-- Row 3: pressure mode — Poly / Channel / Off.
-- Row 4: pressure threshold — Low / Med / High.
-- Row 5: DIN mirror — Off / On (sends notes and pressure to the DIN out as
-  MIDI 1.0).
-- Pressure smoothing — None / Light / Medium / Heavy (one-pole low-pass per
-  held pad at 1 kHz, coefficient 1/2, 1/8, 1/32, 1/64; Light is the default).
-- Rows 7–8: MIDI channel 1–16.
+bright; velocity rows warm, aftertouch rows cool, routing rows soft green,
+the rest mostly white):
+- Row 8 (pads 81–84): velocity mode — Peak-window / Zero-latency / Two-stage /
+  Fixed.
+- Row 7 (pads 71–73): velocity curve — Soft / Linear / Hard.
+- Row 6 (pads 61–63): pressure mode — Poly / Channel / Off.
+- Row 5 (pads 51–53): pressure threshold — Low / Med / High.
+- Row 4 (pads 41–42): DIN mirror — Off / On (sends notes and pressure to the
+  DIN out as MIDI 1.0).
+- Row 3 (pads 31–34): aftertouch smoothing — None / Light / Medium / Heavy
+  (one-pole low-pass per held pad at 1 kHz, coefficient 1/2, 1/8, 1/32, 1/64;
+  Light is the default).
+- Row 2 (pads 21–28): MIDI channel 1–8.
+- Row 1 (pads 11–18): MIDI channel 9–16.
 - Status (read-only): Setup LED is green when the Standalone port is using
   MIDI 2.0. It is amber for MIDI 1.0, including MIDI 1.0 protocol in alt 1.
 

@@ -8,7 +8,7 @@ enum { CURVE_SOFT, CURVE_LINEAR, CURVE_HARD };
 enum { PRESS_POLY, PRESS_CHANNEL, PRESS_OFF };
 enum { THRESH_LOW, THRESH_MED, THRESH_HIGH };
 /* aftertouch low-pass: one pole per held pad at 1 kHz, coefficient 1/2^k with
- * k = 1, 3, 5, 6 (settle to ~2% in about 2, 30, 125, 250 ms) */
+ * k = 1, 3, 5, 6 (settle to ~2% in about 6, 30, 125, 250 ms) */
 enum { SMOOTH_NONE, SMOOTH_LIGHT, SMOOTH_MEDIUM, SMOOTH_HEAVY };
 
 struct settings {

@@ -88,7 +88,7 @@ blue, MIDI routing rows 1, 2 and 4 soft green; the page buttons stay pure white:
 
 Aftertouch smoothing (row 3) is a low-pass on each held pad's pressure before
 it is sent, to cut jitter, for poly and channel pressure alike: None barely
-filters (about 2 ms to settle), Light is the previous behaviour and the
+filters (about 6 ms to settle), Light is the previous behaviour and the
 default (about 30 ms), Medium about 125 ms, Heavy about 250 ms to settle to
 within 2% of a step. More smoothing is steadier but follows quick pressure
 changes later. It is saved with the other settings (settings record version 2;
