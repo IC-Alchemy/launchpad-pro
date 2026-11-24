@@ -36,56 +36,62 @@
 //______________________________________________________________________________
 
 #include "app.h"
+#include "midi2.h"
+#include "instrument/ui.h"
+#include "pads/pad_engine.h"
+#include "platform/pads.h"
 
 //______________________________________________________________________________
 //
-// This is where the fun is!  Add your code to the callbacks below to define how
-// your app behaves.
-//
-// In this example, we either render the raw ADC data as LED rainbows or store
-// and recall the pad state from flash.
+// Stage 2 scale instrument.  Pads, menus and LEDs live in instrument/ui.c, the
+// notes and pressure in pads/pad_engine.c.  This file only routes events, keeps
+// the millisecond counter and bridges the USB "MIDI" port to the DIN port.
 //______________________________________________________________________________
 
-// store ADC frame pointer
-static const u16 *g_ADC = 0;
+// millisecond counter, advanced by the timer event
+static volatile uint32_t g_ms = 0;
 
-// buffer to store pad states for flash save
-#define BUTTON_COUNT 100
+// the USB alternate setting and protocol last seen
+static u8 g_usb_alt;
+static u8 g_usb_midi2;
 
-u8 g_Buttons[BUTTON_COUNT] = {0};
+// The transport ends every Standalone note itself when the alternate setting
+// or protocol changes; the pad engine must forget them too.  Checked before
+// each pad event as well, so a press in the same main-loop pass as the change
+// is not forgotten after it has sounded on the new transport.
+static void check_transport(void)
+{
+    u8 a = midi2_usb_alt();
+    u8 m = midi2_active();
+
+    if (a != g_usb_alt || m != g_usb_midi2)
+    {
+        g_usb_alt = a;
+        g_usb_midi2 = m;
+        ui_transport_changed(g_ms);
+    }
+}
+
+static void main_loop(void)
+{
+    check_transport();
+    ui_poll(g_ms);
+}
 
 //______________________________________________________________________________
 
 void app_surface_event(u8 type, u8 index, u8 value)
 {
+    check_transport();
     switch (type)
     {
-        case  TYPEPAD:
-        {
-            // toggle it and store it off, so we can save to flash if we want to
-            if (value)
-            {
-                g_Buttons[index] = MAXLED * !g_Buttons[index];
-            }
-            
-            // example - light / extinguish pad LEDs
-            hal_plot_led(TYPEPAD, index, 0, 0, g_Buttons[index]);
-            
-            // example - send MIDI
-            hal_send_midi(DINMIDI, NOTEON | 0, index, value);
-            
-        }
-        break;
-            
+        case TYPEPAD:
+            ui_pad(index, value, g_ms);
+            break;
+
         case TYPESETUP:
-        {
-            if (value)
-            {
-                // save button states to flash (reload them by power cycling the hardware!)
-                hal_write_flash(0, g_Buttons, BUTTON_COUNT);
-            }
-        }
-        break;
+            ui_setup(value, g_ms);
+            break;
     }
 }
 
@@ -93,13 +99,13 @@ void app_surface_event(u8 type, u8 index, u8 value)
 
 void app_midi_event(u8 port, u8 status, u8 d1, u8 d2)
 {
-    // example - MIDI interface functionality for USB "MIDI" port -> DIN port
+    // MIDI interface functionality for USB "MIDI" port -> DIN port
     if (port == USBMIDI)
     {
         hal_send_midi(DINMIDI, status, d1, d2);
     }
     
-    // // example -MIDI interface functionality for DIN -> USB "MIDI" port port
+    // MIDI interface functionality for DIN -> USB "MIDI" port
     if (port == DINMIDI)
     {
         hal_send_midi(USBMIDI, status, d1, d2);
@@ -110,99 +116,36 @@ void app_midi_event(u8 port, u8 status, u8 d1, u8 d2)
 
 void app_sysex_event(u8 port, u8 * data, u16 count)
 {
-    // example - respond to UDI messages?
 }
 
 //______________________________________________________________________________
 
 void app_aftertouch_event(u8 index, u8 value)
 {
-    // example - send poly aftertouch to MIDI ports
-    hal_send_midi(USBMIDI, POLYAFTERTOUCH | 0, index, value);
-    
-    
+    // nothing: pressure comes from the raw ADC in the pad engine
 }
 
 //______________________________________________________________________________
 
 void app_cable_event(u8 type, u8 value)
 {
-    // example - light the Setup LED to indicate cable connections
-    if (type == MIDI_IN_CABLE)
-    {
-        hal_plot_led(TYPESETUP, 0, 0, value, 0); // green
-    }
-    else if (type == MIDI_OUT_CABLE)
-    {
-        hal_plot_led(TYPESETUP, 0, value, 0, 0); // red
-    }
 }
 
 //______________________________________________________________________________
 
 void app_timer_event()
 {
-    // example - send MIDI clock at 125bpm
-#define TICK_MS 20
-    
-    static u8 ms = TICK_MS;
-    
-    if (++ms >= TICK_MS)
-    {
-        ms = 0;
-        
-        // send a clock pulse up the USB
-        hal_send_midi(USBSTANDALONE, MIDITIMINGCLOCK, 0, 0);
-    }
-    
-	// alternative example - show raw ADC data as LEDs
-	for (int i=0; i < PAD_COUNT; ++i)
-	{
-		// raw adc values are 12 bit, but LEDs are 6 bit.
-		// Let's saturate into r;g;b for a rainbow effect to show pressure
-		u16 r = 0;
-		u16 g = 0;
-		u16 b = 0;
-		
-		u16 x = (3 * MAXLED * g_ADC[i]) >> 12;
-		
-		if (x < MAXLED)
-		{
-			r = x;
-		}
-		else if (x >= MAXLED && x < (2*MAXLED))
-		{
-			r = 2*MAXLED - x;
-			g = x - MAXLED;
-		}
-		else
-		{
-			g = 3*MAXLED - x;
-			b = x - 2*MAXLED;
-		}
-		
-		hal_plot_led(TYPEPAD, ADC_MAP[i], r, g, b);
-	}
+    g_ms++;
 }
 
 //______________________________________________________________________________
 
 void app_init(const u16 *adc_raw)
 {
-    // example - load button states from flash
-    hal_read_flash(0, g_Buttons, BUTTON_COUNT);
-    
-    // example - light the LEDs to say hello!
-    for (int i=0; i < 10; ++i)
-    {
-        for (int j=0; j < 10; ++j)
-        {
-            u8 b = g_Buttons[j*10 + i];
-            
-            hal_plot_led(TYPEPAD, j*10 + i, 0, 0, b);
-        }
-    }
-	
-	// store off the raw ADC frame pointer for later use
-	g_ADC = adc_raw;
+    g_usb_alt = midi2_usb_alt();
+    g_usb_midi2 = midi2_active();
+    pad_setcalibration(PAD_LIB_THRESHOLD, 1023, 512, 769);
+    pe_init(adc_raw, ui_on_sounding);
+    ui_init(g_ms);
+    midi2_set_main_loop_hook(main_loop);
 }

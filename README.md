@@ -1,165 +1,173 @@
-[![Build Status](https://travis-ci.org/dvhdr/launchpad-pro.svg?branch=master)](https://travis-ci.org/dvhdr/launchpad-pro)
+# Launchpad Pro MIDI 2.0
 
-# Launchpad Pro
-Open source firmware for the Novation Launchpad Pro grid controller!  By customising this code, you can:
+Custom firmware that turns a Novation Launchpad Pro (original, 2015 model) into
+a **USB MIDI 2.0 scale instrument**. Pad velocity goes out as 16-bit values and
+pad pressure as 32-bit values, read from the pads' raw 12-bit sensors, instead
+of being squeezed into MIDI 1.0's 7 bits. The target host is Windows with
+Windows MIDI Services. The device still works as a plain two-port USB MIDI 1.0
+device on hosts without MIDI 2.0 support.
 
-- Implement your own unique standalone apps
-- Create chorders, sequencers, light shows, games and more
-- Have fun!
+Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launchpad-pro)
+(BSD licence, see `LICENSE`). The full design is in
+`docs/superpowers/specs/2026-11-21-midi2-scale-instrument-design.md`.
 
-You'll definitely need *some* C programming experience, but we've deliberately kept much of the firmwarey nastiness tucked away, to make the process a little friendlier.
+## Where things stand
 
-# Philosophy
-We could have released the full source for the factory shipping firmware, but we decided not to for a variety of reasons.  Instead, we created a simplified framework for developing "apps" on Launchpad Pro, which comprises a build environment, application entry points / API, and a library of low level source code.  Our reasoning is as follows:
+| Stage | What | Status |
+|---|---|---|
+| 1 | USB MIDI 2.0 transport: new descriptors (alt 0 MIDI 1.0, alt 1 UMP), Group Terminal Blocks, UMP stream discovery, DIN bridge | **Done, tested on hardware.** Results in `docs/checkpoint-1-results.md`. Three checks (5b, 6a, 6c) were deferred to stage 4. |
+| 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
+| 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
+| 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Not started.** `src/ci/` does not exist yet; `src/ump/ump_rx.c` has a placeholder hook for it. |
+| 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
 
-- There is no value in customising low level routines such as LED multiplexing or ADC scanning - this code has been carefully tweaked over many months to deliver the best results, and is not something you'd want to mess with.
-- There is very little value in customising main() or other low level features, and again these things are hard to do well.  Interrupt priorities? No.
-- If we shipped the application firmware as-is, we'd have a support nightmare on our hands (imagine the phone calls - my "Launchpad Pro is behaving strangely...").  Instead, we wanted to create a clear boundary between "normal" usage with Ableton, and custom firmware.  As such, Ableton integration has been removed from this firmware, as has the setup / navigation functionality. In addition, the "Live" USB MIDI port has been removed, and the device has a different name and USB PID.
-- If we left the Ableton integration and menu structure in place, open firmware developers would have to work around it.  They would also potentially consume precious RAM/CPU resources.  I've a feeling this isn't what you'd want, but we're interested to hear your feedback.
-- Licensing requirements for the CMSIS library version we use are ambiguous.  Yes, we could port to the public version, but why bother, given the above reasoning - I'd prefer to spend my time on good documentation and examples.  As such, all the CMSIS code is compiled into launchpad_pro.a, and we do not need to distribute the headers.
+Current image size: about 30 KB of the 101 KB app flash region (about 70 KB
+free), and about 12.3 KB of the 20 KB RAM. `make` prints the exact flash margin.
 
-I'm sure you'll have feedback for us, so please do get in touch!  I'm [blogging the process too](http://launchpadfirmware.tumblr.com/) if you'd like to read my musings.
+## What the firmware does now
 
-# Setup the Development Environment
+- **Play page.** The 8×8 grid is a scale keyboard. Default: C major, octave 4,
+  layout "In-key 4ths", bottom-left pad = note 60. Roots are bright blue, the
+  3rd and 5th are light blue, other scale notes are dark blue, a sounding pad is
+  white. Buttons 91/92 change the octave, 93/94 change the root.
+- **Notes.** Pads send Note On/Off on the "Standalone Port" (UMP group 0) with
+  16-bit velocity in the MIDI 2.0 Protocol and 7-bit velocity in the MIDI 1.0
+  Protocol. Pads that share a pitch share one note.
+- **Pressure.** Poly Pressure, Channel Pressure, or off, from the raw 12-bit
+  pad ADC, with hysteresis and a rate cap so a steady hold does not flood the
+  port.
+- **Velocity modes.** Peak-window (default; highest raw reading in a 3 ms
+  window), Zero-latency (the library's peak at the press event), Two-stage
+  (time to rise between two thresholds; aimed at the softest playing) and
+  Fixed. Each has a Soft, Linear or Hard curve.
+- **Setup menu.** Tap Setup to open or close, hold it to peek. Button 95 opens
+  the Scale page (root, scale, octave, layout, absolute root), button 96 opens
+  the Options page (velocity mode and curve, pressure mode and threshold, DIN
+  mirror, MIDI channel). Settings are saved to flash 2 s after the last change,
+  once no pad is being played.
+- **DIN.** The "MIDI Port" (UMP group 1) is bridged to the DIN MIDI ports in
+  both directions. With DIN mirror on, pad notes and pressure also go to DIN
+  Out as MIDI 1.0.
+- **Setup LED.** Green = MIDI 2.0 Protocol active. Amber = anything else
+  (MIDI 1.0 Protocol, or USB alternate setting 0).
+- **USB identity.** VID `0x1235`, PID `0x4051` + (bootloader device ID − 1),
+  product "Launchpad Pro MIDI 2.0" (the bootloader may add a suffix such as
+  " 16"). UMP endpoint name "Launchpad Pro MIDI 2.0" with two Function Blocks,
+  "Standalone Port" and "MIDI Port".
 
-## Using Docker
+The full pad map of the menu and every check to run on the hardware are in
+`docs/checkpoint-2-instrument.md`.
 
-If your system is running docker you can easily setup the environment with:
+## Building
 
-```
-docker build -t novation-launchpad-pro-dev .
-docker run -it -v $(pwd):/launchpad-pro novation-launchpad-pro-dev
-make
-```
+You need the ARM GCC toolchain, a host `gcc`/`g++`, `make`, and the
+`tools/libintelhex` git submodule.
 
-## Using Vagrant
+### Linux (Debian / Ubuntu), or Windows via WSL
 
-To use [Vagrant](https://www.vagrantup.com/) to manage the build environment you need to:
-
-1. Clone this repository on your host computer (if using the command line, make sure you `git clone --recursive`).
-2. Install [Vagrant](https://www.vagrantup.com/)
-3. Install [VirtualBox](https://www.virtualbox.org/wiki/Downloads)
-4. Open a command prompt, and navigate to the project directory
-5. Type `vagrant up`, hit enter and grab a beverage of your choice.  Maybe two - it is building a lovely fresh development machine just for you!
-
-If you have a poor internet connection, ummm, find a better one :)
-
-### Building
-Once your new "box" is up and running, you can build the app in one of two ways.  In the spirit of experimentation, we've created a full Eclipse development environment for you to use.  However, you might prefer to do things on the command line.
-
-###  To use the command line interface:
-1. SSH into the Vagrant "box" by doing `vagrant ssh`
-2. At the command prompt, simply type `make`
-
-### To build using Eclipse GUI
-
-**Make sure you wait until the `vagrant up` command has fully completed** before logging in to your VM.  The GUI appears long before the provisioning script finishes.  If you don't, you'll have to log out and log back in again before Eclipse can see the correct path.
-
-1. Log in to the Ubuntu GUI (the password is, as is the convention, **vagrant**).
-2. Launch Eclipse from the doodah on the top left (it's a bit like Spotlight)
-3. Accept the default when Eclipse asks you for a workspace.  I can't figure out how to store the workspace in source control, so you need to import it.
-4. Click "Workbench" at the Eclipse startup screen.
-5. In Eclipse, choose "File->Import..."
-6. Under "C/C++", choose "Existing Code as Makefile Project", hit "Next"
-7. Give the project any name you like (launchpad?)
-8. Under "Existing Code Location" type `/vagrant`.  The toolchain isn't important, the compiler is part of the Makefile.
-9. Hit Finish - you should now see your project.
-10. Select your project by clicking on it.
-11. Click the hammer icon at the top, and wait while the project builds.
-
-Either of the above methods will generate the firmware image, `launchpad_pro.syx`, in the project `build` directory.  You can then upload this to your Launchpad Pro from the host!
-
-## Using macOS
-
-On macOS you can easily install the GCC ARM toolchain using the [homebrew package manager](http://brew.sh). The EABI tools are maintained in an external repository which you need to put on tap first. You can then run ```make``` to directly compile the code:
-
-```
-brew tap PX4/homebrew-px4
-brew install gcc-arm-none-eabi
-make
-```
-
-## Building from a plain checkout
-
-```
+```sh
+git clone --recursive https://github.com/IC-Alchemy/launchpad-pro-MIDI2.git
+cd launchpad-pro-MIDI2
+# if you cloned without --recursive:
 git submodule update --init
-sudo apt-get install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
-make
-make test
+
+sudo apt-get install build-essential gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+
+make         # builds build/launchpad_pro.syx
+make test    # builds and runs the host unit tests
 ```
 
-`make` builds `build/launchpad_pro.syx` and checks that the image fits in the app flash region (101K). `make test` builds and runs the host unit tests.
+This is the setup that is checked: Ubuntu 24.04 with `arm-none-eabi-gcc`
+13.2.1. `make` builds the firmware ELF, runs the host simulator as a smoke
+test, converts the image to `build/launchpad_pro.syx`, and runs
+`tools/check_image.sh` to confirm the image fits below `0x0801F800` (the end of
+the app flash region). It fails if the image does not fit. `make test` runs
+the host unit tests (208 at present) and should end with `0 failures`.
+`make clean` removes `build/`.
 
-# Uploading to a Launchpad Pro
-Now you've got some nice new code to run! To upload it to your Launchpad Pro, you'll need a sysex tool for your host platform (I'd love to get it working from the virtual machine, but that's for later).  I recommend [Sysex Librarian](http://www.snoize.com/SysExLibrarian/) on macOS, and [MIDI OX](http://www.midiox.com/) on Windows.  On Linux, I'll bet you already have a tool in mind.
+### macOS
 
-I won't describe how to use these tools, I'm sure you already know - and if you don't, their documentation is superior to mine!  Here's what you need to do:
+Install the Arm GNU toolchain (for example `brew install --cask gcc-arm-embedded`),
+then follow the Linux steps from `git submodule update --init`. Not tested
+for this fork.
 
-1. Unplug your Launchpad Pro
-2. Hold the "Setup" button down while connecting it to your host via USB (ensure it's connected to the host, and not to a virtual machine!)
-3. The unit will start up in "bootloader" mode
-4. Send your launchpad_pro.syx file to the device MIDI port - it will briefly scroll "upgrading..." across the grid.
-5. Wait for the update to complete, and for the device to reboot!
+### Docker and Vagrant
 
-Tip - set the delay between sysex messages to as low a value as possible, so you're not waiting about for ages while the firmware uploads!
+`Dockerfile`, `Vagrantfile` and `bootstrap.sh` are from the upstream project
+and have not been updated or tested for this fork. Prefer the Linux steps above
+(WSL on Windows works the same way).
 
-# Bricked it!
-Don't worry - even if you upload toxic nonsense to the device, you cannot brick it - the bootloader is stored in a protected area of flash.  If your new firmware doesn't boot, you'll get stuck at step (3) above, or with a crashed unit. Simply repeat the above process with the shipping firmware image (`resources/Launchpad Pro-1.0.154.syx`) to restore your unit to the factory defaults.  Better yet, fix the bugs :)
+## Flashing
 
-# The API
-The API works in two directions - from the HAL (hardware abstraction layer) to the app, and from the app to the HAL.  The HAL calls into your app to:
+Firmware is uploaded over USB as SysEx to the Launchpad Pro's bootloader. The
+bootloader lives in protected flash, so a bad image cannot brick the unit.
 
-- Receive user events from the pads and buttons
-- Receive messages from the MIDI/USB ports
-- Receive a tick message to drive timer based code
-- Be notified when someone connects or disconnects a MIDI cable
+1. Unplug the Launchpad Pro (and any DIN cables).
+2. **Hold the Setup button** and, while holding it, plug in the USB cable.
+   Plug it into the computer itself, not a virtual machine. The unit starts in
+   bootloader mode.
+3. Send `build/launchpad_pro.syx` to the Launchpad Pro's MIDI port with a SysEx
+   tool:
+   - **Windows:** MIDI-OX, *Actions > Send > SysEx File*.
+   - **macOS:** SysEx Librarian.
+   - **Linux:** `amidi -l` to find the port, then
+     `amidi -p hw:1,0,0 -s build/launchpad_pro.syx -i 2` (use your port; `-i`
+     is the pause between SysEx messages in ms).
+4. The grid scrolls "upgrading...". Do not unplug or close the sender while it
+   runs. Wait for the unit to reboot by itself.
 
-By calling into the HAL, your app can:
+A short delay between SysEx messages keeps the upload quick. If the upload
+fails, raise the delay and try again.
 
-- Write colours to the LEDs
-- Send messages to the MIDI/USB ports
-- Store and recall a little bit of data on the Launchpad Pro's flash memory
+Notes:
 
-The best way to learn about these is to read the documentation in `app.h`, and to study the (very basic) example code!
+- **Always enter the bootloader by holding Setup while plugging in.** Updater
+  tools that send a "reboot to bootloader" SysEx do not work while this
+  firmware runs in MIDI 2.0 mode (USB alt 1), because that SysEx no longer
+  reaches the library.
+- On Windows, if MIDI-OX cannot reach the bootloader through Windows MIDI
+  Services, switch the device to the in-box legacy USB Audio driver in Device
+  Manager, or flash from a PC without Windows MIDI Services.
+- **Back to factory firmware:** flash `resources/Launchpad Pro-1.0.154.syx`
+  the same way.
 
-# Debugging
-We decided not to support or encourage using a hardware debugger, as opening a Launchpad Pro to fit a debugging header can easily damage the FSR (force sensitive resistor) sheet.
+## Checking it on Windows
 
-Instead, you're going to have to do things the old fashioned way - by blinking LEDs or sending MIDI messages (though hopefully no need for a 'scope!).  For what it's worth, that's the way I've developed this version of the firmware - dogfooding all the way ;)
+With Windows MIDI Services installed, `midi endpoint list` should show an
+endpoint named "Launchpad Pro MIDI 2.0" with native protocol MIDI 2.0 and two
+Function Blocks. `midi endpoint monitor` shows the 16-bit velocities and 32-bit
+pressure as you play. The checkpoint documents in `docs/` give the full test
+procedures.
 
-If do you want to debug interactively (and of course you do), you can use the interactive desktop simulator on macOS:
+## How it works
 
-1. Build the Xcode project located in `/tools/osx`
-2. Connect your Launchpad Pro
-3. Install the factory firmware on your Launchpad Pro
-4. Put the Launchpad Pro into "Programmer" mode using the Setup button (you'll get odd behaviour otherwise)
-5. Start debugging in Xcode!
+The USB stack and the low-level pad, LED, DIN and flash code live in Novation's
+closed `lib/launchpad_pro.a`. The Makefile builds a trimmed copy of that
+archive without its USB descriptor, property and endpoint objects
+(`usb_desc.o`, `usb_prop.o`, `usb_endp.o`) and links this project's
+replacements in their place. Everything else in the library is used as is.
+`include/app.h` and its ABI are unchanged, so `hal_send_midi` and friends still
+work in both USB modes. The new API is in `include/midi2.h`.
 
-Currently it only supports button presses and LED messages - there's no setup button, flash storage or aftertouch (yet).  It has a really awful busywaiting timer for the 1kHz tick.  However, it does allow you to debug your application logic using Xcode!
+| Path | What is in it |
+|---|---|
+| `src/app.c` | App entry points; wires the instrument to the library callbacks |
+| `src/usb/` | USB descriptors (alt 0 and alt 1), class requests, EP1 endpoint handling, Group Terminal Blocks |
+| `src/ump/` | UMP encode/decode, transmit queue, receive path, stream discovery replies |
+| `src/pads/` | Velocity math and curves, the pad engine (notes, pressure), Two-stage detector |
+| `src/scales/` | Scale table, layouts, pad colour roles |
+| `src/instrument/` | Settings model and flash record, the menu/play UI |
+| `src/platform/` | Access to library internals (raw ADC, pad calibration, interrupts) |
+| `tests/` | Host unit tests (`make test`) |
+| `tools/` | Host simulator, `hextosyx` converter, image size check |
+| `docs/` | Design spec, implementation plans, hardware checkpoint procedures and results |
+| `resources/` | Factory firmware image for recovery |
 
-You can also use the simple command-line simulator located in the `/tools` directory.  It is compiled and ran as part of the build process, so it serves as a very basic test of your app before it is baked into a sysex dump - more of a test harness.
+## Hardware
 
-To debug the simulator interactively in Eclipse:
+STM32F103RB (Cortex-M3, 72 MHz), 20 KiB RAM, 128 KiB flash. The app occupies
+`0x08006400`–`0x0801F7FF` (101 KiB); the 1 KiB page at `0x0801F800` holds the
+saved settings. USB full speed, 64-byte bulk packets on EP1.
 
-1. Click the down arrow next to the little "bug" icon in the toolbar
-2. Choose "Debug configurations..."
-3. Right click "C/C++ Application" and choose "New...:
-4. Under "C/C++ Application" click Browse... and locate the simulator binary at `/vagrant/build/simulator`
-5. Hit "Debug"!
-
-# The Hardware
-The Launchpad Pro is based around an ARM Cortex M3 from STMicroelectronics.  Specifically, an [STM32F103RBT6](http://www.st.com/web/catalog/mmc/FM141/SC1169/SS1031/LN1565/PF164487).  It's clocked at 72MHz, and has 20k RAM (I'm not sure how much of this we're using in the open build yet - should be a fair amount left but I haven't measured it).  The low level LED multiplexing and pad/switch scanning consume a fair bit of CPU time in interrupt mode, but have changed a little in the open firmware library (so again, I don't have measurements for how many cycles they're using).
-
-It has 128k of flash memory, but we won't be exposing all of it as part of this API (dangerously easy to corrupt things!).
-
-# Vagrant tips
-When you're done developing, simply type `vagrant suspend` to halt your VM without destroying it - this will make `vagrant up` a lot quicker next time.  If you're really finished, `vagrant destroy` will completely remove the VM from your system (but not any of your code).
-
-If you only want to build using the command line, you might want to run your Vagrant box headless, which you can do by modifying the Vagrantfile: `vb.gui = false`.  You can also add more CPUs, RAM etc. if you want.
-
-If prefer, you can install the gcc-arm toolchain on your local machine, or you might already have it.  You can find all you need [here](http://gnuarmeclipse.livius.net/).
-
-If your connection drops out while updating the Vagrant box, you can get stuck, unable to `vagrant up`.  To resolve, you need to delete the temp file - `~/vagrant.d/tmp`.
-
-# Firmware development tips
-OK - we're not going to need to use the MISRA rules, but there are a few things to avoid.  Dynamic memory allocation is a no (well it will work, but it's best avoided). Floating point will work, but it's implemented in software and will be slooooow.   C++ ought to work, but you'll definitely want to avoid exceptions and RTTI!
+There is no supported hardware debugger (opening the unit risks damaging the
+pad sensor sheet). Debugging is by LEDs, MIDI output and the host tests.

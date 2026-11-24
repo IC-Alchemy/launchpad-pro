@@ -96,10 +96,13 @@ static void sim_app_midi_event(u8 port, u8 status, u8 d1, u8 d2)
 	app_midi_event(port, status, d1, d2);
 }
 
+void sim_run_main_loop_hook(void);
+
 static void sim_app_timer_event()
 {
 	printf("calling app_timer_event()...\n");
 	app_timer_event();
+	sim_run_main_loop_hook();
 }
 
 // ____________________________________________________________________________
