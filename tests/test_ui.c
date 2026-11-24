@@ -306,7 +306,7 @@ static void test_options_page_select(void)
 	CHECK(led_is(95, 6, 6, 6));
 	CHECK(led_is(81, 63, 63, 63));  /* Peak-window */
 	CHECK(led_is(21, 63, 63, 63));  /* channel 1 */
-	CHECK(led_is(31, 0, 0, 0));
+	CHECK(led_is(31, 6, 6, 6));     /* None, unselected */
 	tap(82, T0 + 110);
 	CHECK_EQ(ui_settings()->velocity_mode, VEL_ZERO_LATENCY);
 	CHECK(led_is(82, 63, 63, 63));
@@ -340,6 +340,35 @@ static void test_options_page_select(void)
 	CHECK_EQ(count_kind(0, 'N'), 2);  /* Standalone and DIN */
 	CHECK_EQ(io_log[0].ch, 7);
 	CHECK_EQ(io_log[0].note, 60);
+}
+
+static void test_smoothing_row_columns(void)
+{
+	static const uint8_t col_val[4] = {SMOOTH_NONE, SMOOTH_LIGHT, SMOOTH_MEDIUM,
+	                                   SMOOTH_HEAVY};
+	int c, k;
+
+	setup();
+	setup_tap(T0);
+	tap(96, T0 + 100);
+	CHECK_EQ(ui_settings()->pressure_smoothing, SMOOTH_LIGHT);
+	for (c = 0; c < 4; c++) {
+		tap((uint8_t)(31 + c), T0 + 110 + c);
+		CHECK_EQ(ui_settings()->pressure_smoothing, col_val[c]);
+		for (k = 0; k < 4; k++) {
+			if (k == c)
+				CHECK(led_is((uint8_t)(31 + k), 63, 63, 63));
+			else
+				CHECK(led_is((uint8_t)(31 + k), 6, 6, 6));
+		}
+	}
+	/* pads 35..38 do nothing */
+	for (c = 5; c <= 8; c++) {
+		tap((uint8_t)(30 + c), T0 + 200 + c);
+		CHECK_EQ(ui_settings()->pressure_smoothing, SMOOTH_HEAVY);
+		CHECK(led_is((uint8_t)(30 + c), 0, 0, 0));
+	}
+	CHECK_EQ(io_n, 0);
 }
 
 static void test_menu_reopens_on_last_page(void)
@@ -615,6 +644,7 @@ void test_ui_all(void)
 	RUN(test_velocity_row_columns);
 	RUN(test_scale_page_select);
 	RUN(test_options_page_select);
+	RUN(test_smoothing_row_columns);
 	RUN(test_menu_reopens_on_last_page);
 	RUN(test_pad_held_across_menu_is_silent);
 	RUN(test_settings_saved_after_quiet);

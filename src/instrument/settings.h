@@ -7,20 +7,27 @@ enum { VEL_PEAK_WINDOW, VEL_ZERO_LATENCY, VEL_FIXED, VEL_TWO_STAGE };
 enum { CURVE_SOFT, CURVE_LINEAR, CURVE_HARD };
 enum { PRESS_POLY, PRESS_CHANNEL, PRESS_OFF };
 enum { THRESH_LOW, THRESH_MED, THRESH_HIGH };
+/* aftertouch low-pass: one pole per held pad at 1 kHz, coefficient 1/2^k with
+ * k = 1, 3, 5, 6 (settle to ~2% in about 2, 30, 125, 250 ms) */
+enum { SMOOTH_NONE, SMOOTH_LIGHT, SMOOTH_MEDIUM, SMOOTH_HEAVY };
 
 struct settings {
 	uint8_t root, scale, octave, layout, absolute_root,
 	        velocity_mode, velocity_curve, pressure_mode,
-	        pressure_threshold, din_mirror, channel;
+	        pressure_threshold, din_mirror, channel, pressure_smoothing;
 };
 
-#define SETTINGS_RECORD_LEN 17
+/* Record: 'LPM2', version, 12 fields, checksum. Version 1 had 11 fields (17
+ * bytes, no smoothing); settings_load still accepts it. */
+#define SETTINGS_RECORD_LEN 18
+#define SETTINGS_RECORD_V1_LEN 17
 #define SETTINGS_SAVE_QUIET_MS 2000
 
 void settings_defaults(struct settings *s);
 uint8_t settings_valid(const struct settings *s);
 void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN]);
-/* 1 ok; 0 leaves *s untouched */
+/* 1 ok; 0 leaves *s untouched. Version 1 records (first 17 bytes) decode with
+ * the default smoothing; the 18th byte is then ignored. */
 uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *s);
 /* flash offset 0; defaults on failure; remembers the result as "saved" */
 void settings_load(struct settings *s);

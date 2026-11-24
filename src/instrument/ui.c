@@ -95,6 +95,7 @@ static void configure(void)
 {
 	pe_configure(g_s.velocity_mode, g_s.velocity_curve, g_s.pressure_mode,
 	             g_s.pressure_threshold);
+	pe_set_smoothing(g_s.pressure_smoothing);
 }
 
 /* 1 if grid pad i is an item on the current menu page */
@@ -149,6 +150,9 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 			uint8_t *rows[3] = {&g_s.pressure_threshold, &g_s.pressure_mode,
 			                    &g_s.velocity_curve};
 			it->field = rows[r - 5];
+			it->value = c;
+		} else if (r == 3 && c < 4) {
+			it->field = &g_s.pressure_smoothing;
 			it->value = c;
 		} else if (r == 4 && c < 2) {
 			it->field = &g_s.din_mirror;
