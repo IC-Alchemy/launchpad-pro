@@ -9,6 +9,9 @@
 #include <stddef.h>
 #include <string.h>
 
+/* fractional bits of the pressure filter state */
+#define PE_FILT_FRAC 8
+
 enum { PE_IDLE, PE_CAPTURING, PE_HELD };
 
 /* pressure destinations: index into the per-destination send times */
@@ -34,10 +37,15 @@ struct pe_pad
         uint16_t sent[PE_DESTS];    /* PE_HELD: low 16 bits of the ms counter
                                      * at the pitch's last pressure send */
     } t;
-    uint16_t peak;      /* velocity peak, raised while capturing. Peak-window:
-                         * raw 12-bit (seeded ADC_Max * 4); Zero-latency:
-                         * the library's 10-bit ADC_Max */
-    uint16_t filt;      /* PE_HELD: filtered raw 12-bit ADC value x 16 */
+    union
+    {
+        uint16_t peak;  /* PE_CAPTURING: velocity peak, raised while
+                         * capturing. Peak-window: raw 12-bit (seeded
+                         * ADC_Max * 4); Zero-latency: the library's 10-bit
+                         * ADC_Max */
+        uint32_t filt;  /* PE_HELD: filtered raw 12-bit ADC value x 256 (the
+                         * peak is spent by then, so they share the word) */
+    } v;
     uint16_t sent12;    /* PE_HELD: pitch's last 12-bit pressure on Standalone */
     uint8_t state;      /* PE_IDLE / PE_CAPTURING / PE_HELD */
     uint8_t pitch;      /* latched 0..127 */
@@ -82,6 +90,9 @@ static uint8_t g_vel_mode;
 static uint8_t g_curve;
 static uint8_t g_press_mode;
 static uint8_t g_threshold;
+/* filter coefficient 1/2^k per SMOOTH_* level */
+static const uint8_t SMOOTH_K[4] = {1, 3, 5, 6};
+static uint8_t g_smooth_k = 3;
 
 /* Two-stage: the engine, the main loop's current ms (for its callback) and
  * the provider of pitch/channel/DIN at its Note On */
@@ -126,9 +137,9 @@ static void sample(struct pe_pad *p, uint8_t slot)
 {
     uint16_t v = raw(slot);
 
-    if (v > p->peak)
+    if (v > p->v.peak)
     {
-        p->peak = v;
+        p->v.peak = v;
     }
 }
 
@@ -155,7 +166,7 @@ static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
     uint8_t slot = (uint8_t)(p - g_pad);
 
     p->state = PE_HELD;
-    p->filt = (uint16_t)(raw(slot) * 16u);
+    p->v.filt = (uint32_t)raw(slot) << PE_FILT_FRAC;
     if (g_nheld++ == 0)
     {
         /* channel pressure is at 0 here: the last release sent it */
@@ -193,7 +204,7 @@ static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
 /* capture (or zero-latency press) finished: velocity from the peak */
 static void sound(struct pe_pad *p, uint32_t now, uint8_t wide)
 {
-    sound_v(p, velocity(p->peak, wide), now);
+    sound_v(p, velocity(p->v.peak, wide), now);
 }
 
 /* a held pad stops sounding its pitch */
@@ -295,7 +306,7 @@ static void ts_note(void *ctx, u8 adc_ch, u8 on, u16 vel)
         p->pitch = (uint8_t)pitch;
         p->ch = ch & 0x0F;
         p->din = din ? 1 : 0;
-        p->peak = 0;
+        p->v.peak = 0;
         sound_v(p, pad_curve(vel, g_curve), g_now);
     }
 }
@@ -392,10 +403,13 @@ static void pressure_pass(uint32_t now)
         {
             continue;
         }
-        d = (int32_t)raw(slot) * 16 - (int32_t)p->filt;
-        p->filt = (uint16_t)((int32_t)p->filt + d / 8);
+        /* rounded one-pole step: converges to the exact target (the
+         * rounding half cancels the shift's floor), no stall short of it */
+        d = ((int32_t)raw(slot) << PE_FILT_FRAC) - (int32_t)p->v.filt;
+        p->v.filt = (uint32_t)((int32_t)p->v.filt +
+                               ((d + (1 << (g_smooth_k - 1))) >> g_smooth_k));
         list[n] = slot;
-        val[n] = pad_pressure12((uint16_t)(((uint32_t)p->filt + 8u) >> 4), g_threshold);
+        val[n] = pad_pressure12((uint16_t)((p->v.filt + (1u << (PE_FILT_FRAC - 1))) >> PE_FILT_FRAC), g_threshold);
         n++;
     }
     if (n == 0 || g_press_mode == PRESS_OFF)
@@ -471,6 +485,7 @@ void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding)
     g_adc = adc_buffer;
     g_on_sounding = on_sounding;
     pe_configure(VEL_PEAK_WINDOW, CURVE_LINEAR, PRESS_POLY, THRESH_MED);
+    pe_set_smoothing(SMOOTH_LIGHT);
 }
 
 void pe_configure(uint8_t velocity_mode, uint8_t curve, uint8_t pressure_mode, uint8_t threshold)
@@ -483,6 +498,11 @@ void pe_configure(uint8_t velocity_mode, uint8_t curve, uint8_t pressure_mode, u
     g_curve = curve;
     g_press_mode = pressure_mode;
     g_threshold = threshold;
+}
+
+void pe_set_smoothing(uint8_t smoothing)
+{
+    g_smooth_k = SMOOTH_K[smoothing < 4 ? smoothing : SMOOTH_LIGHT];
 }
 
 void pe_set_target(pe_target_fn fn)
@@ -510,11 +530,11 @@ void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32
     p->din = din_mirror ? 1 : 0;
     p->t.press = now;
     /* ADC_Max holds this hit's peak until the press callback returns */
-    p->peak = ADC_Max[slot];
+    p->v.peak = ADC_Max[slot];
     if (g_vel_mode == VEL_PEAK_WINDOW)
     {
         /* the window keeps a raw 12-bit peak: seed with the 10-bit one x4 */
-        p->peak = p->peak > 1023 ? 4095 : (uint16_t)(p->peak * 4);
+        p->v.peak = p->v.peak > 1023 ? 4095 : (uint16_t)(p->v.peak * 4);
         p->state = PE_CAPTURING;
     }
     else

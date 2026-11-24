@@ -46,6 +46,12 @@ void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding);
  * entering it makes pe_release a no-op, so a held note would be stuck. */
 void pe_configure(uint8_t velocity_mode, uint8_t curve, uint8_t pressure_mode, uint8_t threshold);
 
+/* Aftertouch smoothing, SMOOTH_* from instrument/settings.h (default
+ * SMOOTH_LIGHT after pe_init): the one-pole low-pass on each held pad's raw
+ * sample. Takes effect on the next pressure pass; held pads keep their
+ * filter state. */
+void pe_set_smoothing(uint8_t smoothing);
+
 /* pad: grid index 11..88. pitch -1 (or any value outside 0..127): ignored.
  * ch: 0..15. din_mirror: also send on DINMIDI. now: ms counter.
  * In VEL_TWO_STAGE both pe_press and pe_release are ignored: the engine in

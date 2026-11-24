@@ -20,14 +20,18 @@
 enum { PAGE_SCALE, PAGE_OPTIONS };
 
 /* menu item colour families, each dim (index 0) and bright (index 1) */
-enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION };
+enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING, K_KINDS };
 
-static const uint8_t ITEM_RGB[5][2][3] = {
+static const uint8_t ITEM_RGB[K_KINDS][2][3] = {
 	{{0, 8, 0}, {0, 63, 0}},       /* root keys: green */
 	{{0, 0, 8}, {0, 0, 63}},       /* scales: blue */
 	{{8, 0, 0}, {63, 0, 0}},       /* octave: red */
 	{{8, 3, 0}, {63, 24, 0}},      /* layouts and absolute root: amber */
-	{{6, 6, 6}, {63, 63, 63}},     /* option rows, page buttons, arrows: white */
+	{{6, 6, 6}, {63, 63, 63}},     /* page buttons, arrows: white */
+	/* Options page sections: mostly white with a light hue */
+	{{6, 5, 3}, {63, 48, 36}},     /* velocity: warm */
+	{{3, 5, 6}, {36, 52, 63}},     /* aftertouch: cool */
+	{{4, 6, 4}, {44, 63, 40}},     /* MIDI routing: soft green */
 };
 
 static const uint8_t ROLE_RGB[5][3] = {
@@ -95,6 +99,7 @@ static void configure(void)
 {
 	pe_configure(g_s.velocity_mode, g_s.velocity_curve, g_s.pressure_mode,
 	             g_s.pressure_threshold);
+	pe_set_smoothing(g_s.pressure_smoothing);
 }
 
 /* 1 if grid pad i is an item on the current menu page */
@@ -137,7 +142,6 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 			return 0;
 		}
 	} else {
-		it->kind = K_OPTION;
 		if (r == 8 && c < 4) {
 			/* menu order: Peak-window, Zero-latency, Two-stage, Fixed */
 			static const uint8_t VEL_AT[4] = {VEL_PEAK_WINDOW, VEL_ZERO_LATENCY,
@@ -145,17 +149,25 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 
 			it->field = &g_s.velocity_mode;
 			it->value = VEL_AT[c];
+			it->kind = K_VELOCITY;
 		} else if (r >= 5 && r < 8 && c < 3) {
 			uint8_t *rows[3] = {&g_s.pressure_threshold, &g_s.pressure_mode,
 			                    &g_s.velocity_curve};
 			it->field = rows[r - 5];
 			it->value = c;
+			it->kind = r == 7 ? K_VELOCITY : K_AFTERTOUCH;
+		} else if (r == 3 && c < 4) {
+			it->field = &g_s.pressure_smoothing;
+			it->value = c;
+			it->kind = K_AFTERTOUCH;
 		} else if (r == 4 && c < 2) {
 			it->field = &g_s.din_mirror;
 			it->value = c;
+			it->kind = K_ROUTING;
 		} else if (r == 2 || r == 1) {
 			it->field = &g_s.channel;
 			it->value = (uint8_t)((r == 1 ? 8 : 0) + c);
+			it->kind = K_ROUTING;
 		} else {
 			return 0;
 		}
