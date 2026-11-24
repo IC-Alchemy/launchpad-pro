@@ -5,7 +5,11 @@ TOOLS = tools
 SOURCES += src/app.c
 
 # firmware-only sources (USB MIDI 2.0 transport); not part of the simulator
-FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/pads/*.c src/scales/*.c src/instrument/*.c)
+FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/midici/*.c src/pads/*.c src/scales/*.c src/instrument/*.c)
+
+# MIDI-CI: Microsoft's header-only responder (src/midici/vendor) is C++17; the
+# check TU compiles it with the firmware flags (no exceptions, no RTTI, no libstdc++)
+FW_CXX_SOURCES += src/midici/vendor/ci_headers_check.cpp
 
 INCLUDES += -Iinclude -Isrc -I
 
@@ -15,7 +19,7 @@ ORIG_LIB = lib/launchpad_pro.a
 LIB = $(BUILDDIR)/launchpad_pro_trimmed.a
 LIB_WORK = $(BUILDDIR)/lib_trim
 
-OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES))))
+OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_SOURCES) $(FW_CXX_SOURCES))))
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
 SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
@@ -46,6 +50,7 @@ TEST_SOURCES += tests/test_pressure.c
 TEST_SOURCES += tests/test_ui.c src/instrument/ui.c
 TEST_SOURCES += tests/test_pads.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
+TEST_SOURCES += tests/test_midici.c src/midici/midici.c src/midici/ci_queue.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"
 
@@ -54,6 +59,7 @@ TEST_CFLAGS = -std=c99 -Wall -Werror -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDE
 HOST_GPP = g++ -include cstdint
 HOST_GCC = gcc
 CC = arm-none-eabi-gcc
+CXX = arm-none-eabi-g++
 LD = arm-none-eabi-gcc
 OBJCOPY = arm-none-eabi-objcopy
 AR = arm-none-eabi-ar
@@ -63,6 +69,8 @@ CFLAGS  = -Os -Wall -I.\
 -fsigned-char  -DSTM32F10X_MD -DUSE_STDPERIPH_DRIVER -DHSE_VALUE=6000000UL \
 -DCMSIS -DUSE_GLOBAL_CONFIG -ffunction-sections -std=c99  -mlittle-endian \
 $(INCLUDES) -o
+
+CXXFLAGS = -Os -Wall -Wextra -mthumb -mcpu=cortex-m3 -mlittle-endian -fsigned-char -std=c++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics -ffunction-sections -fdata-sections -include src/midici/vendor/sal_shim.h $(INCLUDES) -o
 
 LDSCRIPT = stm32_flash.ld
 
@@ -110,6 +118,10 @@ DEPENDS := $(OBJECTS:.o=.d)
 $(BUILDDIR)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) -c $(CFLAGS) -MMD -o $@ $<
+
+$(BUILDDIR)/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) -c $(CXXFLAGS) -MMD -o $@ $<
 
 submodules:
 	@test -f $(TOOLS)/libintelhex/include/intelhex.h || { echo "run: git submodule update --init"; exit 1; }

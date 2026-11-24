@@ -23,6 +23,7 @@ void test_pressure_all(void);
 void test_ui_all(void);
 void test_pads_all(void);
 void test_twostage_all(void);
+void test_midici_all(void);
 
 int main(void)
 {
@@ -42,6 +43,7 @@ int main(void)
 	test_ui_all();
 	test_pads_all();
 	test_twostage_all();
+	test_midici_all();
 
 	printf("%d failures\n", test_failures());
 	return test_failures() ? 1 : 0;

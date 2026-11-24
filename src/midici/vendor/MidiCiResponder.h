@@ -1,0 +1,442 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License
+// ============================================================================
+// This is part of the Windows MIDI Services App API and should be used
+// in your Windows application via an official binary distribution.
+// Further information: https://aka.ms/midi
+// ============================================================================
+
+#pragma once
+
+#include "MidiCiMessage.h"
+
+namespace WindowsMidiServicesCapabilityInquiry
+{
+    struct ResponderConfig
+    {
+        uint32_t Muid{ 0 };
+
+        uint8_t ManufacturerSysExId[3]{};
+
+        uint16_t DeviceFamily{ 0 };
+        uint16_t DeviceFamilyModelNumber{ 0 };
+
+        uint8_t SoftwareRevisionLevel[4]{};
+
+        uint8_t CapabilityCategories{ 0 };
+        uint32_t ReceivableMaximumSysExSize{ 512 };
+
+        uint8_t FunctionBlockNumber{ 0 };
+
+        // Sets capability bit D3 in the Discovery reply. Without it no initiator will ever ask us
+        // for a property.
+        bool SupportsPropertyExchange{ false };
+
+        // One at a time. A responder that parks a single request and drops the rest must say so,
+        // or initiators will pipeline requests it silently discards.
+        uint8_t SimultaneousPropertyRequests{ 1 };
+
+        // Declares Process Inquiry in Discovery and answers its capabilities inquiry. The host has
+        // to build each MIDI Message Report itself, because only it knows the device's state.
+        bool SupportsProcessInquiry{ false };
+
+        // What Inquiry: Endpoint is answered with. It must match the Product Instance Id the UMP
+        // Endpoint declares in its stream notification. Left empty, the inquiry gets a NAK.
+        uint8_t ProductInstanceId[ProductInstanceIdMaximumByteCount]{};
+        uint8_t ProductInstanceIdByteCount{ 0 };
+    };
+
+    inline constexpr uint8_t CapabilityBitPropertyExchange{ 0x08 };
+
+    // Zero is not a MIDI-CI version, so a message that carries one tells us nothing and echoing it
+    // back would be worse than answering in the newest form we know.
+    inline constexpr uint8_t ReplyVersionFor(_In_ uint8_t const requestVersion) noexcept
+    {
+        return requestVersion == 0 ? MessageVersionCurrent : requestVersion;
+    }
+
+    enum class ResponderAction
+    {
+        Ignored = 0,
+        Replied,
+        MuidInvalidated,
+        ReplyBufferTooSmall,
+
+        // Another device withdrew its identifier. Nothing to send; the host drops whatever it was
+        // holding for that initiator. ParsedMessage::TargetMuid says whose.
+        InitiatorMuidInvalidated,
+
+        // Another device is using our identifier. The reply is an Invalidate MUID withdrawing it,
+        // and the host owes us a new one afterwards, exactly as for MuidInvalidated.
+        MuidCollision,
+
+        // The caller owns the answer from here: it parses the header JSON with Windows.Data.Json,
+        // which cannot be done at this layer, then drives a PropertyReplyChunker.
+        PropertyDataRequested,
+
+        // A subscription start, end or update reply. Same reason the caller owns it: the command
+        // and the subscription identifier are both in the header JSON.
+        PropertySubscriptionRequested,
+
+        // A well formed Inquiry: MIDI Message Report. The caller sends the reply, the messages that
+        // report its state and the end, all of which only it can know. ParsedMessage carries the
+        // device id and the bitmaps.
+        MidiMessageReportRequested,
+    };
+
+    // Produces replies into a buffer the caller owns. It never sends, never allocates and holds no
+    // transport, which is what lets the same responder serve the service, a virtual device app and
+    // a message transform without being forked.
+    class Responder
+    {
+    public:
+        void Initialize(_In_ ResponderConfig const& config) noexcept
+        {
+            m_config = config;
+            m_muidNeedsReplacement = false;
+        }
+
+        uint32_t Muid() const noexcept { return m_config.Muid; }
+
+        void SetMuid(_In_ uint32_t const muid) noexcept
+        {
+            m_config.Muid = muid;
+            m_muidNeedsReplacement = false;
+        }
+
+        // Set when another device tells us our MUID collided. The host owns replacing it, because
+        // generating one needs a random source this layer deliberately does not have.
+        bool MuidNeedsReplacement() const noexcept { return m_muidNeedsReplacement; }
+
+        ResponderAction ProcessMessage(
+            _In_ ParsedMessage const& message,
+            _Out_writes_bytes_to_opt_(replyCapacity, *replyByteCount) uint8_t* const replyBuffer,
+            _In_ size_t const replyCapacity,
+            _Out_ size_t* const replyByteCount
+        ) noexcept
+        {
+            if (replyByteCount != nullptr)
+            {
+                *replyByteCount = 0;
+            }
+
+            if (!AddressedToUs(message))
+            {
+                return ResponderAction::Ignored;
+            }
+
+            if (message.Type == MessageType::InvalidateMuid)
+            {
+                if (message.TargetMuid == m_config.Muid && m_config.Muid != 0)
+                {
+                    m_config.Muid = 0;
+                    m_muidNeedsReplacement = true;
+
+                    return ResponderAction::MuidInvalidated;
+                }
+
+                // Somebody else's identifier went away. Nothing to reply to, but a host holding
+                // state for that initiator needs to know it is dead.
+                return ResponderAction::InitiatorMuidInvalidated;
+            }
+
+            if (message.Type == MessageType::Discovery)
+            {
+                // Replying is required even though no categories are supported yet.
+                if (m_config.Muid == 0)
+                {
+                    return ResponderAction::Ignored;
+                }
+
+                // Two devices picked the same identifier. M2-101-UM section 5.9.1 gives two ways
+                // out; this is option B, which withdraws the duplicate for everyone holding it
+                // including us. Option A is only open to a responder that has not used its
+                // identifier yet, and nothing here tracks that.
+                if (message.SourceMuid == m_config.Muid)
+                {
+                    if (replyBuffer == nullptr || replyCapacity < InvalidateMuidByteCount)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    const auto withdrawn = BuildInvalidateMuid(
+                        m_config.Muid, m_config.Muid, replyBuffer, replyCapacity);
+
+                    if (withdrawn == 0)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    if (replyByteCount != nullptr)
+                    {
+                        *replyByteCount = withdrawn;
+                    }
+
+                    m_config.Muid = 0;
+                    m_muidNeedsReplacement = true;
+
+                    return ResponderAction::MuidCollision;
+                }
+
+                if (replyBuffer == nullptr || replyCapacity < DiscoveryReplyByteCount)
+                {
+                    return ResponderAction::ReplyBufferTooSmall;
+                }
+
+                DiscoveryReplyFields fields{};
+
+                fields.SourceMuid = m_config.Muid;
+                fields.DestinationMuid = message.SourceMuid;
+
+                fields.ManufacturerSysExId[0] = m_config.ManufacturerSysExId[0];
+                fields.ManufacturerSysExId[1] = m_config.ManufacturerSysExId[1];
+                fields.ManufacturerSysExId[2] = m_config.ManufacturerSysExId[2];
+
+                fields.DeviceFamily = m_config.DeviceFamily;
+                fields.DeviceFamilyModelNumber = m_config.DeviceFamilyModelNumber;
+
+                fields.SoftwareRevisionLevel[0] = m_config.SoftwareRevisionLevel[0];
+                fields.SoftwareRevisionLevel[1] = m_config.SoftwareRevisionLevel[1];
+                fields.SoftwareRevisionLevel[2] = m_config.SoftwareRevisionLevel[2];
+                fields.SoftwareRevisionLevel[3] = m_config.SoftwareRevisionLevel[3];
+
+                fields.CapabilityCategories = m_config.CapabilityCategories;
+
+                if (m_config.SupportsPropertyExchange)
+                {
+                    fields.CapabilityCategories |= CapabilityBitPropertyExchange;
+                }
+
+                if (m_config.SupportsProcessInquiry)
+                {
+                    fields.CapabilityCategories |= CategoryProcessInquiry;
+                }
+
+                fields.ReceivableMaximumSysExSize = m_config.ReceivableMaximumSysExSize;
+
+                fields.OutputPathId = message.OutputPathId;
+                fields.FunctionBlockNumber = m_config.FunctionBlockNumber;
+
+                // Replied to in the version it asked in. A 1.1 initiator reads a fixed length and
+                // has no room for the output path id or the function block number.
+                fields.MessageVersion = ReplyVersionFor(message.VersionFormat);
+
+                const auto written = BuildDiscoveryReply(fields, replyBuffer, replyCapacity);
+
+                if (written == 0)
+                {
+                    return ResponderAction::ReplyBufferTooSmall;
+                }
+
+                if (replyByteCount != nullptr)
+                {
+                    *replyByteCount = written;
+                }
+
+                return ResponderAction::Replied;
+            }
+
+            // What a NAK says when one is owed, if a branch below does not narrow it down.
+            uint8_t nakStatus = NakStatusMessageNotSupported;
+            uint8_t nakDeviceId = DeviceIdFunctionBlock;
+
+            if (message.Type == MessageType::PropertyGetDataInquiry)
+            {
+                if (m_config.SupportsPropertyExchange &&
+                    m_config.Muid != 0 &&
+                    message.HasPropertyExchangeFields)
+                {
+                    return ResponderAction::PropertyDataRequested;
+                }
+            }
+            else if (message.Type == MessageType::PropertySubscriptionInquiry)
+            {
+                if (m_config.SupportsPropertyExchange &&
+                    m_config.Muid != 0 &&
+                    message.HasPropertyExchangeFields)
+                {
+                    return ResponderAction::PropertySubscriptionRequested;
+                }
+            }
+            else if (message.Type == MessageType::PropertyExchangeCapabilitiesInquiry)
+            {
+                if (m_config.SupportsPropertyExchange && m_config.Muid != 0)
+                {
+                    if (replyBuffer == nullptr || replyCapacity < PropertyExchangeCapabilitiesByteCount)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    const auto written = BuildPropertyExchangeCapabilitiesReply(
+                        m_config.Muid,
+                        message.SourceMuid,
+                        m_config.SimultaneousPropertyRequests,
+                        replyBuffer,
+                        replyCapacity,
+                        ReplyVersionFor(message.VersionFormat));
+
+                    if (written == 0)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    if (replyByteCount != nullptr)
+                    {
+                        *replyByteCount = written;
+                    }
+
+                    return ResponderAction::Replied;
+                }
+            }
+            else if (message.Type == MessageType::EndpointInquiry)
+            {
+                // Product Instance Id is the only status defined. Any other, or a device with no id
+                // to give, falls through to the NAK that M2-101-UM section 5.8 asks for.
+                if (m_config.Muid != 0 &&
+                    message.HasEndpointFields &&
+                    message.Endpoint.Status == EndpointStatusProductInstanceId &&
+                    ProductInstanceIdIsValid(m_config.ProductInstanceId, m_config.ProductInstanceIdByteCount))
+                {
+                    if (replyBuffer == nullptr ||
+                        replyCapacity < EndpointReplyFixedByteCount + m_config.ProductInstanceIdByteCount)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    const auto written = BuildEndpointReply(
+                        m_config.Muid,
+                        message.SourceMuid,
+                        message.Endpoint.Status,
+                        m_config.ProductInstanceId,
+                        m_config.ProductInstanceIdByteCount,
+                        replyBuffer,
+                        replyCapacity,
+                        ReplyVersionFor(message.VersionFormat));
+
+                    if (written == 0)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    if (replyByteCount != nullptr)
+                    {
+                        *replyByteCount = written;
+                    }
+
+                    return ResponderAction::Replied;
+                }
+            }
+            else if (message.Type == MessageType::ProcessInquiryCapabilities)
+            {
+                if (m_config.SupportsProcessInquiry && m_config.Muid != 0)
+                {
+                    if (replyBuffer == nullptr || replyCapacity < ProcessInquiryCapabilitiesReplyByteCount)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    const auto written = BuildProcessInquiryCapabilitiesReply(
+                        m_config.Muid,
+                        message.SourceMuid,
+                        ProcessInquiryFeatureMidiMessageReport,
+                        replyBuffer,
+                        replyCapacity,
+                        ReplyVersionFor(message.VersionFormat));
+
+                    if (written == 0)
+                    {
+                        return ResponderAction::ReplyBufferTooSmall;
+                    }
+
+                    if (replyByteCount != nullptr)
+                    {
+                        *replyByteCount = written;
+                    }
+
+                    return ResponderAction::Replied;
+                }
+            }
+            else if (message.Type == MessageType::MidiMessageReport)
+            {
+                if (m_config.SupportsProcessInquiry && m_config.Muid != 0)
+                {
+                    const auto deviceId = message.DeviceId;
+                    const bool addressable = deviceId <= 0x0F || deviceId == 0x7E || deviceId == DeviceIdFunctionBlock;
+
+                    const auto control = message.MidiMessageReport.MessageDataControl;
+                    const bool knownControl =
+                        control == MessageDataControlNone ||
+                        control == MessageDataControlNonDefault ||
+                        control == MessageDataControlFull;
+
+                    // M2-101-UM section 5.11.2: a cut short inquiry, or a data control from the
+                    // reserved range, is malformed; a device id from the reserved range names
+                    // nothing in use. Either way the initiator is told now rather than left waiting.
+                    if (addressable && message.HasMidiMessageReportFields && knownControl)
+                    {
+                        return ResponderAction::MidiMessageReportRequested;
+                    }
+
+                    nakStatus = addressable ? NakStatusMessageMalformed : NakStatusNotInUse;
+                    nakDeviceId = addressable ? deviceId : DeviceIdFunctionBlock;
+                }
+            }
+
+            // Being able to NAK is one of the three things M2-101-UM section 2 asks of every
+            // MIDI-CI device. An initiator that gets silence instead waits out its timeout and may
+            // write the device off; a NAK ends the transaction at once.
+            if (m_config.Muid != 0 && MessageTypeExpectsAResponderAnswer(message.Type))
+            {
+                if (replyBuffer == nullptr || replyCapacity < AcknowledgmentFixedByteCount)
+                {
+                    return ResponderAction::ReplyBufferTooSmall;
+                }
+
+                AcknowledgmentFields fields{};
+
+                fields.OriginalMessageType = static_cast<uint8_t>(message.Type);
+                fields.StatusCode = nakStatus;
+
+                const auto written = BuildAcknowledgment(
+                    MessageType::Nak,
+                    nakDeviceId,
+                    m_config.Muid,
+                    message.SourceMuid,
+                    fields,
+                    nullptr,
+                    0,
+                    replyBuffer,
+                    replyCapacity);
+
+                if (written == 0)
+                {
+                    return ResponderAction::ReplyBufferTooSmall;
+                }
+
+                if (replyByteCount != nullptr)
+                {
+                    *replyByteCount = written;
+                }
+
+                return ResponderAction::Replied;
+            }
+
+            return ResponderAction::Ignored;
+        }
+
+    private:
+        bool AddressedToUs(_In_ ParsedMessage const& message) const noexcept
+        {
+            if (message.DestinationMuid == MuidBroadcast)
+            {
+                return true;
+            }
+
+            // Answering a conversation between two other devices would corrupt it.
+            return m_config.Muid != 0 && message.DestinationMuid == m_config.Muid;
+        }
+
+        ResponderConfig m_config{};
+        bool m_muidNeedsReplacement{ false };
+    };
+}

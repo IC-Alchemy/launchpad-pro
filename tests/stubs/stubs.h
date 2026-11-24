@@ -18,6 +18,9 @@ extern uint8_t stub_sysex_buf[320];
 extern uint16_t stub_sysex_len;
 extern uint8_t stub_sysex_port;
 extern int stub_sysex_calls;
+/* platform_entropy32 returns stub_entropy_seq[0..n-1] in order, then a counter. */
+extern uint32_t stub_entropy_seq[16];
+extern int stub_entropy_n;
 
 /* Recording stand-ins for the ST USB library, the c_midi/fifo internals of the
  * closed library and the __real_ side of the linker wraps. stubs_reset()
