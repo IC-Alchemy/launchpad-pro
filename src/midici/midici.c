@@ -257,6 +257,11 @@ uint16_t midici_tx_pending(void)
 	return ci_queue_count(&ci_tx);
 }
 
+uint16_t midici_tx_free_packets(void)
+{
+	return ci_queue_free(&ci_tx);
+}
+
 uint8_t midici_tx_drain(uint8_t max_packets)
 {
 	uint32_t pkt[2];
