@@ -1,6 +1,7 @@
 #include "ump.h"
-#include "ci/midi_ci.h"
 #include "platform/platform.h"
+#include "midici/ci_identity.h"
+#include "midici/responder.h"
 
 #define ST_EP_DISCOVERY 0x000
 #define ST_EP_INFO 0x001
@@ -109,7 +110,8 @@ static void endpoint_discovery(const uint32_t msg[4])
 	}
 	if (filter & 0x02) {
 		/* manufacturer 00 20 29, family 0x0051, model 0x0000, version 00 01 00 00 */
-		uint32_t m[4] = {head(0, ST_DEV_IDENTITY, 0), 0x00002029u, 0x51000000u, 0x00010000u};
+		uint32_t m[4] = {head(0, ST_DEV_IDENTITY, 0), CI_UMP_IDENTITY_WORD1,
+		                 CI_UMP_IDENTITY_WORD2, CI_UMP_IDENTITY_WORD3};
 		push4(m);
 	}
 	if (filter & 0x04)

@@ -16,7 +16,8 @@
 #define TS_REL 80
 #define TS_TIMEOUT_MS 80
 #define TS_REL_TICKS 3
-#define TS_DT_FAST_Q8 256
+#define TS_DT_MIN_Q8 23    /* ~0.09 ms: dt at or below this is full velocity */
+#define TS_DT_MAX_Q8 1024  /* 4 ms: dt at or above this is TS_VEL_MIN */
 #define TS_VEL_MIN 0x0200
 
 enum { TS_IDLE, TS_ARMED, TS_HELD };
@@ -41,6 +42,12 @@ void ts_init(ts_engine *e);
 /* First call primes. A call with now_ms == last_ms is ignored. */
 void ts_tick(ts_engine *e, const u16 *raw, u32 now_ms, ts_note_fn fn, void *ctx);
 void ts_release_all(ts_engine *e, ts_note_fn fn, void *ctx);   /* Off for every HELD pad, all to IDLE */
+/* Velocity from the T1..T2 time dt (Q8 ms), logarithmic between two bounds:
+ *   dt <= TS_DT_MIN_Q8 (0 counts as MIN)  -> 0xFFFF
+ *   dt >= TS_DT_MAX_Q8                    -> TS_VEL_MIN
+ *   between: TS_VEL_MIN + (0xFFFF - TS_VEL_MIN) * ln(MAX/dt) / ln(MAX/MIN)
+ * So each doubling of dt costs the same velocity step, spreading medium and
+ * hard hits instead of clipping them. Non-increasing in dt, never 0. */
 u16 ts_velocity(u32 dt_q8);
 /* crossing time inside the span (last_ms, last_ms + span], Q8 ms */
 u32 ts_cross_q8(u32 last_ms, u32 span, u16 prev, u16 x, u16 level);

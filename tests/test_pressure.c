@@ -267,6 +267,82 @@ static uint16_t raw_for(uint16_t p12)
     return r;
 }
 
+/* Step raw from the pressure start (0) to full scale at t = 0 and return the
+ * ms at which the 12-bit pressure first sent on USB reaches 98% of full;
+ * *final gets the last value sent after 600 ms, -1 if it never reaches. */
+static int settle_ms(uint8_t smoothing, int *final)
+{
+    uint32_t t;
+    int i, first = -1;
+
+    setup(PRESS_POLY, 1);
+    pe_set_smoothing(smoothing);
+    set_raw(45, PRESSURE_START_MED);
+    press(45, 64, 0, 0);
+    for (t = 1; t <= 5; t++)
+        poll(t);
+    set_raw(45, PRESSURE_FULL_RAW);
+    for (t = 6; t <= 606; t++)
+    {
+        poll(t);
+        for (i = 0; i < io_n; i++)
+            if (first < 0 && io_log[i].kind == 'P' && io_log[i].port == USBSTANDALONE &&
+                (io_log[i].v >> 20) >= 4013)
+                first = (int)(t - 6);
+    }
+    i = last_of('P', USBSTANDALONE, 64);
+    *final = i < 0 ? -1 : (int)(io_log[i].v >> 20);
+    return first;
+}
+
+static void test_smoothing_settle_times(void)
+{
+    int f[4], t[4], k;
+
+    for (k = 0; k < 4; k++)
+        t[k] = settle_ms((uint8_t)k, &f[k]);
+    /* every level converges exactly to full scale, no stall short of it */
+    for (k = 0; k < 4; k++)
+    {
+        CHECK(t[k] >= 0);
+        CHECK_EQ(f[k], 4095);
+    }
+    CHECK(t[SMOOTH_HEAVY] >= 230 && t[SMOOTH_HEAVY] <= 280);
+    CHECK(t[SMOOTH_MEDIUM] < t[SMOOTH_HEAVY]);
+    CHECK(t[SMOOTH_LIGHT] < t[SMOOTH_MEDIUM]);
+    CHECK(t[SMOOTH_NONE] < t[SMOOTH_LIGHT]);
+    CHECK(t[SMOOTH_LIGHT] <= 40);
+    CHECK(t[SMOOTH_NONE] <= 12);
+}
+
+static void test_smoothing_applies_to_channel_pressure(void)
+{
+    uint32_t t;
+    int i, n_none = 0, n_heavy = 0;
+
+    setup(PRESS_CHANNEL, 1);
+    pe_set_smoothing(SMOOTH_HEAVY);
+    set_raw(45, PRESSURE_START_MED);
+    press(45, 64, 0, 0);
+    set_raw(45, PRESSURE_FULL_RAW);
+    for (t = 1; t <= 20; t++)
+        poll(t);
+    i = last_of('C', USBSTANDALONE, -1);
+    CHECK(i >= 0);
+    n_heavy = (int)(io_log[i].v >> 20);
+    setup(PRESS_CHANNEL, 1);
+    pe_set_smoothing(SMOOTH_NONE);
+    set_raw(45, PRESSURE_START_MED);
+    press(45, 64, 0, 0);
+    set_raw(45, PRESSURE_FULL_RAW);
+    for (t = 1; t <= 20; t++)
+        poll(t);
+    i = last_of('C', USBSTANDALONE, -1);
+    CHECK(i >= 0);
+    n_none = (int)(io_log[i].v >> 20);
+    CHECK(n_none > n_heavy);
+}
+
 static void test_pressure_noise_does_not_flood_7bit(void)
 {
     /* rest values on a 7-bit step boundary (p12 = k * 32) and in between */
@@ -714,6 +790,8 @@ void test_pressure_all(void)
     RUN(test_pressure_rate_cap);
     RUN(test_pressure_rate_cap_across_ms_wrap);
     RUN(test_pressure_jitter_does_not_flood);
+    RUN(test_smoothing_settle_times);
+    RUN(test_smoothing_applies_to_channel_pressure);
     RUN(test_pressure_noise_does_not_flood_7bit);
     RUN(test_pressure_noise_does_not_flood_midi2);
     RUN(test_seven_bit_dest_sends_on_change_only);

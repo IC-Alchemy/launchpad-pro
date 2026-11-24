@@ -138,9 +138,12 @@ press event, then squeezes it to 7 bits with its own curve. So:
 - *Two-stage*: the app does its own press detection from the raw 12-bit
   `adc_buffer`, and velocity is the time the reading takes to rise from a low
   threshold T1 to a high threshold T2. Crossing times are interpolated
-  linearly between samples (Q8 ms). Velocity is
-  `0xFFFF * TS_DT_FAST / dt`, floored at `TS_VEL_MIN` (7-bit value 1), so
-  short time is loud, long time soft, with most resolution at the soft end.
+  linearly between samples (Q8 ms). Velocity is logarithmic in dt between two
+  bounds: dt <= `TS_DT_MIN_Q8` (23, about 0.09 ms, a single-tick hit) gives
+  0xFFFF; dt >= `TS_DT_MAX_Q8` (1024, 4 ms) gives `TS_VEL_MIN` (7-bit value 1);
+  between, `TS_VEL_MIN + (0xFFFF - TS_VEL_MIN) * ln(MAX/dt) / ln(MAX/MIN)`,
+  computed in integers (log2 in Q12 via table). Each doubling of dt costs an
+  equal velocity step, so medium and hard hits spread instead of clipping.
   Per pad: `TS_IDLE`, `TS_ARMED` (T1 crossed), `TS_HELD`. ARMED reaching T2
   sends Note On. ARMED for `TS_TIMEOUT_MS` while still above T1 sends Note On
   with the timeout's velocity (a very slow gentle press still sounds). ARMED
@@ -150,8 +153,8 @@ press event, then squeezes it to 7 bits with its own curve. So:
   gives one Note On. Aim is the softest playing; it may be weaker at the loud
   end, which the player accepts.
   Defaults (12-bit): `TS_T1 = 120`, `TS_T2 = 480`, `TS_REL = 80`,
-  `TS_TIMEOUT_MS = 80`, `TS_REL_TICKS = 3`, `TS_DT_FAST = 1 ms`,
-  `TS_VEL_MIN = 0x0200`; must hold `TS_REL < TS_T1 < TS_T2`.
+  `TS_TIMEOUT_MS = 80`, `TS_REL_TICKS = 3`, `TS_DT_MIN_Q8 = 23`,
+  `TS_DT_MAX_Q8 = 1024`, `TS_VEL_MIN = 0x0200`; must hold `TS_REL < TS_T1 < TS_T2`.
   The engine runs in the main loop, from the pad engine's `pe_poll`, once per
   new millisecond (not in the timer interrupt). It is fed the absolute ms
   counter; the main loop may skip milliseconds, so crossing times are
@@ -387,14 +390,20 @@ button is lit.
   octave red, layouts amber.
 
 *Options page* (one option per row, one pad per value, selected value
-bright):
-- Row 1: velocity mode — Peak-window / Zero-latency / Two-stage / Fixed.
-- Row 2: velocity curve — Soft / Linear / Hard.
-- Row 3: pressure mode — Poly / Channel / Off.
-- Row 4: pressure threshold — Low / Med / High.
-- Row 5: DIN mirror — Off / On (sends notes and pressure to the DIN out as
-  MIDI 1.0).
-- Rows 7–8: MIDI channel 1–16.
+bright; velocity rows warm, aftertouch rows cool, routing rows soft green,
+the rest mostly white):
+- Row 8 (pads 81–84): velocity mode — Peak-window / Zero-latency / Two-stage /
+  Fixed.
+- Row 7 (pads 71–73): velocity curve — Soft / Linear / Hard.
+- Row 6 (pads 61–63): pressure mode — Poly / Channel / Off.
+- Row 5 (pads 51–53): pressure threshold — Low / Med / High.
+- Row 4 (pads 41–42): DIN mirror — Off / On (sends notes and pressure to the
+  DIN out as MIDI 1.0).
+- Row 3 (pads 31–34): aftertouch smoothing — None / Light / Medium / Heavy
+  (one-pole low-pass per held pad at 1 kHz, coefficient 1/2, 1/8, 1/32, 1/64;
+  Light is the default).
+- Row 2 (pads 21–28): MIDI channel 1–8.
+- Row 1 (pads 11–18): MIDI channel 9–16.
 - Status (read-only): Setup LED is green when the Standalone port is using
   MIDI 2.0. It is amber for MIDI 1.0, including MIDI 1.0 protocol in alt 1.
 
@@ -402,7 +411,9 @@ bright):
 
 - Settings (scale, root, octave, layout, absolute root, all options) use a
   fixed-width record in the HAL's 1 KiB user flash page, with a magic value,
-  version and checksum. Validate field ranges before use. Blank flash,
+  version and checksum (version 2 added the pressure smoothing byte; a
+  version 1 record still loads, with the default smoothing). Validate field
+  ranges before use. Blank flash,
   unsupported versions and incomplete or invalid records load defaults.
 - Close the menu immediately and defer the flash write until a short quiet
   period with no active notes. Compare settings with the last saved record

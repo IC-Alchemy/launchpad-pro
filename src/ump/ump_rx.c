@@ -1,7 +1,8 @@
 #include "ump/ump.h"
-#include "ci/midi_ci.h"
 #include "platform/irq.h"
 #include "app.h"
+#include "midici/midici.h"
+#include "midici/responder.h"
 
 static uint32_t ring[UMP_RX_WORDS];
 static volatile uint16_t head; /* written by push (interrupt) */
@@ -18,8 +19,13 @@ static uint16_t seen_epoch;
 static uint32_t msg[4];
 static uint8_t have;
 static uint8_t need;
-static struct ump_sysex7_rx sysex[2];
-static struct midi_ci_reply ci_reply;
+
+/* Interrupt-side framing (touched only under irq_save, by push and reset): MT 0x3
+ * packets are diverted to the MIDI-CI queue so the main-loop ring never sees them. */
+static uint8_t isr_left;	/* words still to come in the current message */
+static uint8_t isr_mt3;		/* the current message is SysEx7 */
+static uint8_t isr_have;	/* words of isr_pkt collected */
+static uint32_t isr_pkt[2];
 
 void ump_rx_reset(void)
 {
@@ -28,7 +34,11 @@ void ump_rx_reset(void)
 	tail = 0;
 	overflows = 0;
 	epoch++;
+	isr_left = 0;
+	isr_mt3 = 0;
+	isr_have = 0;
 	irq_restore(s);
+	midici_reset();
 }
 
 uint16_t ump_rx_free_words(void)
@@ -45,6 +55,24 @@ void ump_rx_push_words(const uint32_t *w, uint16_t n)
 	uint16_t h = head;
 	uint16_t t = tail;
 	for (uint16_t i = 0; i < n; i++) {
+		if (isr_left == 0) {
+			uint8_t need = ump_word_count(w[i]);
+			if (need == 0 || need > 4)
+				need = 1;
+			isr_left = need;
+			isr_mt3 = (uint8_t)((w[i] >> 28) == 3);
+			isr_have = 0;
+		}
+		isr_left--;
+		if (isr_mt3) {
+			/* SysEx7 is exactly 2 words; the queue copy is all this does */
+			isr_pkt[isr_have++] = w[i];
+			if (isr_have == 2) {
+				isr_have = 0;
+				midici_rx_push(isr_pkt);
+			}
+			continue;
+		}
 		if ((uint16_t)(h - t) >= UMP_RX_WORDS) {
 			overflows++;
 			continue;
@@ -77,36 +105,13 @@ static void dispatch(void)
 		uint8_t n = ump_to_midi1(msg, out, 8);
 		for (uint8_t i = 0; i < n; i++)
 			app_midi_event(group, out[i][0], out[i][1], out[i][2]);
-	} else if (mt == 3) {
-		struct ump_sysex7_rx *rx = &sysex[group];
-		if (ump_sysex7_rx_feed(rx, msg) == 1) {
-			if (group != USBSTANDALONE || !midi_ci_receive(rx->buf, rx->len, &ci_reply))
-				app_sysex_event(group, rx->buf, rx->len);
-			ump_sysex7_rx_reset(rx);
-		}
 	}
-}
-
-/* Runs under the RX epoch lock. A blocked reply stays pending until USB IN
- * drains the control ring. This also orders a collision's Invalidate before
- * the Function Block notification and keeps alt changes from leaking a reply. */
-static int queue_ci_reply(void)
-{
-	if (ci_reply.len) {
-		if (ump_tx_push_sysex7(USBSTANDALONE, ci_reply.data, ci_reply.len) != 0)
-			return 0;
-		ci_reply.len = 0;
-	}
-	if (ci_reply.muid_changed) {
-		if (ump_stream_notify_function_block(0) != 0)
-			return 0;
-		ci_reply.muid_changed = 0;
-	}
-	return 1;
 }
 
 void ump_rx_poll(void)
 {
+	midici_poll();
+	midici_responder_poll();
 	for (;;) {
 		uint32_t s = irq_save();
 		uint16_t t = tail;
@@ -114,10 +119,6 @@ void ump_rx_poll(void)
 		uint32_t w = 0;
 		uint16_t ep = epoch;
 		int got = (h != t);
-		if (ep == seen_epoch && !queue_ci_reply()) {
-			irq_restore(s);
-			return;
-		}
 		if (got) {
 			w = ring[t % UMP_RX_WORDS];
 			tail = (uint16_t)(t + 1);
@@ -127,10 +128,6 @@ void ump_rx_poll(void)
 			seen_epoch = ep;
 			have = 0;
 			need = 0;
-			ump_sysex7_rx_reset(&sysex[0]);
-			ump_sysex7_rx_reset(&sysex[1]);
-			ci_reply.len = 0;
-			ci_reply.muid_changed = 0;
 		}
 		if (!got)
 			return;

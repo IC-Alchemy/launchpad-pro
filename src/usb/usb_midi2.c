@@ -15,6 +15,8 @@
 #include "platform/irq.h"
 #include "platform/platform.h"
 #include "ump/ump.h"
+#include "midici/midici.h"
+#include "midici/responder.h"
 #include "midi2.h"
 #include <string.h>
 
@@ -227,7 +229,7 @@ void hal_send_channel_pressure2(u8 port, u8 ch, u32 value)
 void __wrap_midi_parsers_init(void)
 {
 	__real_midi_parsers_init();
-	platform_start_muid_entropy();
+	midici_responder_init();
 	memcpy(parser_snapshot, USBParserToDev, sizeof parser_snapshot);
 	parser_snapshot_valid = 1;
 	ump_stream_set_protocol_hook(midi2_protocol_changing);
@@ -260,7 +262,7 @@ void __wrap_midi_parsers_poll(void)
 	 * drained: that paces the host to the DIN wire rate */
 	s = irq_save();
 	if (alt && !pending_service && GetEPRxStatus(1) == EP_RX_NAK && ump_rx_free_words() >= 16 &&
-	    !fifo1k_unempty(&MIDIDinOut))
+	    midici_rx_free_packets() >= 8 && !fifo1k_unempty(&MIDIDinOut))
 		SetEPRxValid(1);
 	irq_restore(s);
 	midi_parse_rx_byte_stream(&MIDIDinIn, DinRx, DINMIDI);
@@ -286,6 +288,9 @@ void __wrap_usbmidi_poll(void)
 		irq_restore(s);
 		return;
 	}
+	/* MIDI-CI replies into the control ring: a bounded few packets per pass, so
+	 * pad and LED traffic is never starved */
+	midici_tx_drain(CI_TX_DRAIN_MAX);
 	/* atomic with respect to set_alt, which NAKs EP1 and resets the queue */
 	s = irq_save();
 	if (alt && bDeviceState == USB_STATE_CONFIGURED && GetEPTxStatus(1) != EP_TX_VALID) {

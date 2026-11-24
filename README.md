@@ -71,7 +71,7 @@ UMP endpoint. In Live MIDI, press and release a pad and vary its pressure to
 check MIDI 2.0 note and pressure messages. The MIDI2Sound CLI can also run
 `midi_monitor_cli --ci-discover --endpoint Launchpad --all-groups`.
 
-The firmware reuses the same [MIT-licensed Microsoft MIDI-CI headers](src/ci/third_party/microsoft/README.md)
+The firmware reuses the same [MIT-licensed Microsoft MIDI-CI headers](src/midici/vendor/README.md)
 as MIDI2Sound.
 
 ## Building

@@ -19,15 +19,35 @@ void ts_init(ts_engine *e)
 	}
 }
 
+/* log2(1 + i/16) in Q12, i = 0..16 */
+static const u16 lg_tab[17] = {
+	0, 358, 696, 1016, 1319, 1607, 1882, 2145, 2396,
+	2637, 2869, 3092, 3307, 3514, 3715, 3908, 4096
+};
+
+/* log2(x) in Q12 for 1 <= x < 2^20: highest set bit + table interpolation */
+static u32 log2_q12(u32 x)
+{
+	u32 msb = 0, f, i, r;
+	while ((x >> (msb + 1)) != 0)
+		msb++;
+	f = (((x - (1u << msb)) << 12) >> msb);	/* fraction, Q12, < 4096 */
+	i = f >> 8;
+	r = f & 255;
+	return (msb << 12) + lg_tab[i] + (((u32)(lg_tab[i + 1] - lg_tab[i]) * r) >> 8);
+}
+
 u16 ts_velocity(u32 dt_q8)
 {
-	u32 dt = dt_q8 < 1 ? 1 : dt_q8;
-	u32 v = (0xFFFFu * TS_DT_FAST_Q8) / dt;	/* 0xFFFF * 256 < 2^32 */
-	if (v > 0xFFFFu)
-		v = 0xFFFFu;
-	if (v < TS_VEL_MIN)
-		v = TS_VEL_MIN;
-	return (u16)v;
+	u32 num, den;
+	if (dt_q8 <= TS_DT_MIN_Q8)
+		return 0xFFFFu;
+	if (dt_q8 >= TS_DT_MAX_Q8)
+		return TS_VEL_MIN;
+	num = log2_q12(TS_DT_MAX_Q8) - log2_q12(dt_q8);	/* 0..den */
+	den = log2_q12(TS_DT_MAX_Q8) - log2_q12(TS_DT_MIN_Q8);
+	/* (0xFFFF - MIN) * num < 65023 * 22700 < 2^32 */
+	return (u16)(TS_VEL_MIN + ((u32)(0xFFFFu - TS_VEL_MIN) * num) / den);
 }
 
 u32 ts_cross_q8(u32 last_ms, u32 span, u16 prev, u16 x, u16 level)

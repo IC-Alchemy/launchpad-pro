@@ -2,6 +2,7 @@
 #include "stubs/stubs.h"
 #include "usb/usb_compat.h"
 #include "usb/usb_midi2.h"
+#include "midici/midici.h"
 #include "platform/lib_private.h"
 #include "ump/ump.h"
 #include "midi2.h"
@@ -136,7 +137,7 @@ static void test_ci_discovery_endpoint_and_version(void)
 	const uint8_t identity[] = {0, 0x20, 0x29, 0x51, 0, 0, 0, 0, 1, 0, 0};
 	CHECK_MEM(reply.buf + 14, identity, sizeof(identity));
 	CHECK_EQ(reply.buf[25], 0); /* no Profile, PE or Process Inquiry */
-	CHECK_EQ(reply.buf[26] + (reply.buf[27] << 7), UMP_SYSEX7_BUFFER_BYTES - 2);
+	CHECK_EQ(reply.buf[26] + (reply.buf[27] << 7), CI_REASSEMBLY_BYTES);
 	CHECK_EQ(reply.buf[30], 7); /* initiator Output Path ID */
 	CHECK_EQ(reply.buf[31], 0); /* Standalone Function Block */
 	memcpy(inquiry + 10, reply.buf + 6, 4);
@@ -237,9 +238,7 @@ static void test_ci_reply_retries_and_is_discarded_on_alt_change(void)
 	enter_alt1();
 	while (ump_tx_push(UMP_TX_CONTROL, filler, 4) == 0) {}
 	host_out_sysex(0, ci_discovery, sizeof(ci_discovery));
-	host_in_ci(&reply, 0);
-	CHECK_EQ(reply.len, 0);
-	__wrap_midi_parsers_poll();
+	/* the reply waits in CiTxQueue until USB IN frees the control ring, then arrives */
 	host_in_ci(&reply, 0);
 	CHECK_EQ(reply.buf[4], 0x71);
 	CHECK_EQ(reply.len, 33);

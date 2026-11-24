@@ -18,11 +18,15 @@ void platform_product_instance_id(char out[25])
 	out[i] = 0;
 }
 
-void platform_start_muid_entropy(void) {}
+uint32_t stub_entropy_seq[16];
+int stub_entropy_n;
+static int stub_entropy_i;
 
-uint32_t platform_muid_entropy(void)
+uint32_t platform_entropy32(void)
 {
-	return 0x12345678u;
+	if (stub_entropy_i < stub_entropy_n)
+		return stub_entropy_seq[stub_entropy_i++];
+	return 0x12345678u + (uint32_t)stub_entropy_i++ * 0x01010101u;
 }
 
 struct stub_midi_ev stub_midi_log[64];
@@ -39,6 +43,8 @@ static void stub_usb_reset(void);
 void stubs_reset(void)
 {
 	stub_usb_reset();
+	stub_entropy_n = 0;
+	stub_entropy_i = 0;
 	stub_midi_n = 0;
 	stub_midi_total = 0;
 	stub_sysex_len = 0;
