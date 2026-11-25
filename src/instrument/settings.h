@@ -6,7 +6,10 @@
 enum { VEL_PEAK_WINDOW, VEL_ZERO_LATENCY, VEL_FIXED, VEL_TWO_STAGE };
 enum { CURVE_SOFT, CURVE_LINEAR, CURVE_HARD };
 enum { PRESS_POLY, PRESS_CHANNEL, PRESS_OFF };
-enum { THRESH_LOW, THRESH_MED, THRESH_HIGH };
+/* THRESH_INSTANT: aftertouch from first contact (the level where velocity
+ * sensing starts), with no dead zone before it */
+enum { THRESH_LOW, THRESH_MED, THRESH_HIGH, THRESH_INSTANT };
+#define THRESH_COUNT 4
 /* aftertouch low-pass: one pole per held pad at 1 kHz, coefficient 1/2^k with
  * k = 1, 3, 5, 6 (settle to ~2% in about 6, 30, 125, 250 ms) */
 enum { SMOOTH_NONE, SMOOTH_LIGHT, SMOOTH_MEDIUM, SMOOTH_HEAVY };

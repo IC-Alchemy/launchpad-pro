@@ -74,7 +74,7 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 | `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
 | `ChannelList` | yes | | | The Standalone Port and its MIDI channel |
 | `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 24), `octave` (0 to 7), `layout`, `absoluteRoot` |
-| `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold`, `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
+| `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
 | `X-ScaleList` | yes | | | The 25 scale names, in `scale` order |
 
 A Set changes only the fields it gives and is applied like a change in the

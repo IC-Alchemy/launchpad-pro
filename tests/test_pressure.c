@@ -783,6 +783,43 @@ static void test_release_stops_pressure(void)
     CHECK(last_of('P', DINMIDI, 65) > f);
 }
 
+/* THRESH_INSTANT: a light hold, below every other threshold's start, already
+ * sends pressure, and the range starts where velocity sensing does */
+static void test_instant_pressure_from_first_contact(void)
+{
+    uint32_t t;
+    uint16_t start = pad_pressure_start(THRESH_INSTANT, PadCalibration[0]);
+
+    CHECK_EQ(start, (PadCalibration[0] + 80) * 4);
+    CHECK(start < PRESSURE_START_LOW);
+    CHECK_EQ(pad_pressure_start(THRESH_INSTANT, 1023), PRESSURE_START_LOW);  /* capped */
+    CHECK_EQ(pad_pressure_start(THRESH_MED, 0), PRESSURE_START_MED);
+    CHECK_EQ(pad_pressure12_from(start, start), 0);
+    CHECK_EQ(pad_pressure12_from(PRESSURE_FULL_RAW, start), 4095);
+    CHECK(pad_pressure12_from(start + 100, start) > 0);
+    /* pad_pressure12 keeps its old values for the three fixed thresholds */
+    CHECK_EQ(pad_pressure12(2081, THRESH_MED), 131);
+
+    /* a hold at raw 1500: nothing at THRESH_LOW, pressure at once when instant */
+    setup(PRESS_POLY, 1);
+    pe_configure(VEL_ZERO_LATENCY, CURVE_LINEAR, PRESS_POLY, THRESH_LOW);
+    set_raw(45, 1500);
+    press(45, 64, 0, 0);
+    for (t = 1; t <= 30; t++)
+        poll(t);
+    CHECK_EQ(count_kind('P', 0), 0);
+    release(45, 31);
+
+    setup(PRESS_POLY, 1);
+    pe_configure(VEL_ZERO_LATENCY, CURVE_LINEAR, PRESS_POLY, THRESH_INSTANT);
+    set_raw(45, 1500);
+    press(45, 64, 0, 0);
+    for (t = 1; t <= 30; t++)
+        poll(t);
+    CHECK(count_kind('P', 0) > 0);
+    release(45, 31);
+}
+
 void test_pressure_all(void)
 {
     RUN(test_poly_pressure_follows_raw);
@@ -803,4 +840,5 @@ void test_pressure_all(void)
     RUN(test_pressure_off);
     RUN(test_no_pressure_while_capturing);
     RUN(test_release_stops_pressure);
+    RUN(test_instant_pressure_from_first_contact);
 }

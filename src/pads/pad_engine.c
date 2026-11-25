@@ -393,6 +393,8 @@ static void pressure_pass(uint32_t now)
     uint8_t k;
     uint8_t j;
     uint16_t now16 = (uint16_t)now;
+    /* read each pass: the trigger calibration is the vendor library's */
+    const uint16_t start = pad_pressure_start(g_threshold, PadCalibration[0]);
 
     for (slot = 0; slot < 64; slot++)
     {
@@ -409,7 +411,7 @@ static void pressure_pass(uint32_t now)
         p->v.filt = (uint32_t)((int32_t)p->v.filt +
                                ((d + (1 << (g_smooth_k - 1))) >> g_smooth_k));
         list[n] = slot;
-        val[n] = pad_pressure12((uint16_t)((p->v.filt + (1u << (PE_FILT_FRAC - 1))) >> PE_FILT_FRAC), g_threshold);
+        val[n] = pad_pressure12_from((uint16_t)((p->v.filt + (1u << (PE_FILT_FRAC - 1))) >> PE_FILT_FRAC), start);
         n++;
     }
     if (n == 0 || g_press_mode == PRESS_OFF)

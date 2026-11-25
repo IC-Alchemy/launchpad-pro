@@ -30,7 +30,7 @@ uint8_t settings_valid(const struct settings *s)
 	       s->layout < LAYOUT_COUNT && s->absolute_root <= 1 &&
 	       s->din_mirror <= 1 && s->velocity_mode < 4 &&
 	       s->velocity_curve < 3 && s->pressure_mode < 3 &&
-	       s->pressure_threshold < 3 && s->channel < 16 &&
+	       s->pressure_threshold < THRESH_COUNT && s->channel < 16 &&
 	       s->pressure_smoothing < 4;
 }
 

@@ -77,7 +77,7 @@ blue, MIDI routing rows 1, 2 and 4 soft green; the page buttons stay pure white:
 
 | Row | Pads | What |
 |---|---|---|
-| 5 | 51, 52, 53 | Pressure threshold: Low, Med, High |
+| 5 | 51, 52, 53, 54 | Pressure threshold: Low, Med, High, Instant (aftertouch from first contact) |
 | 6 | 61, 62, 63 | Pressure: Poly, Channel, Off |
 | 7 | 71, 72, 73 | Velocity curve: Soft, Linear, Hard |
 | 8 | 81, 82, 83, 84 | Velocity mode: Peak-window, Zero-latency, Two-stage, Fixed |
@@ -138,6 +138,9 @@ hardware, so I need your feel for them:
 
 - Pressure thresholds, in raw 12-bit ADC counts: Low 1792, Med 2048, High
   2304. Pressure reads 0 at or below the threshold and reaches full at 3076.
+  Instant starts where velocity sensing starts, (trigger + 80) x 4 from the
+  pad calibration (400 with the app's trigger of 20), so aftertouch follows
+  the finger from first contact with no dead zone. It never starts above Low.
 - Noise filter and hysteresis: a MIDI 2.0 destination gets a new pressure
   value only when it moved by 32 counts of 4096 (`PRESSURE_HYST`). A 7-bit
   destination (DIN, and USB in MIDI 1.0) gets a new value only when the
@@ -232,7 +235,8 @@ increase and decrease the pressure, then do a slow sweep. Expected: Poly
 Pressure values (32-bit) that look continuous and finely stepped, not 128
 steps, rising from near zero to near full, with no flood of messages while
 you hold a steady pressure. Capture one sweep for "What to send back".
-Also try Low (pad 51) and High (pad 53) thresholds.
+Also try Low (pad 51), High (pad 53) and Instant (pad 54): with Instant,
+aftertouch should move as soon as the pad is down, before you lean on it.
 
 ## 8. Channel pressure
 

@@ -287,14 +287,19 @@ static void test_velocity_row_columns(void)
 	tap(85, T0 + 200);
 	CHECK_EQ(ui_settings()->velocity_mode, VEL_FIXED);
 	CHECK(led_is(85, 0, 0, 0));
-	/* other rows stay 3 columns */
+	/* curve and pressure mode stay 3 columns */
 	tap(74, T0 + 210);
 	CHECK_EQ(ui_settings()->velocity_curve, CURVE_LINEAR);
 	CHECK(led_is(74, 0, 0, 0));
 	tap(64, T0 + 220);
 	CHECK_EQ(ui_settings()->pressure_mode, PRESS_POLY);
-	tap(54, T0 + 230);
+	/* the threshold row has a fourth column: instant aftertouch */
+	tap(55, T0 + 225);
 	CHECK_EQ(ui_settings()->pressure_threshold, THRESH_MED);
+	CHECK(led_is(55, 0, 0, 0));
+	tap(54, T0 + 230);
+	CHECK_EQ(ui_settings()->pressure_threshold, THRESH_INSTANT);
+	CHECK(!led_is(54, 0, 0, 0));
 }
 
 static void test_options_page_select(void)
@@ -324,6 +329,8 @@ static void test_options_page_select(void)
 	CHECK_EQ(ui_settings()->velocity_curve, CURVE_HARD);
 	tap(62, T0 + 140);
 	CHECK_EQ(ui_settings()->pressure_mode, PRESS_CHANNEL);
+	tap(54, T0 + 145);
+	CHECK_EQ(ui_settings()->pressure_threshold, THRESH_INSTANT);
 	tap(51, T0 + 150);
 	CHECK_EQ(ui_settings()->pressure_threshold, THRESH_LOW);
 	tap(42, T0 + 160);
