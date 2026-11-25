@@ -48,6 +48,15 @@ void io_note_on(uint8_t port, uint8_t ch, uint8_t note, uint16_t vel)
 	log_ev('N', port, ch, note, vel);
 }
 
+void io_note_on_pitch(uint8_t port, uint8_t ch, uint8_t note, uint16_t vel, uint16_t pitch79)
+{
+	log_ev('N', port, ch, note, vel);
+	if (io_n && io_n <= 256) {
+		io_log[io_n - 1].has_pitch = 1;
+		io_log[io_n - 1].pitch = pitch79;
+	}
+}
+
 void io_note_off(uint8_t port, uint8_t ch, uint8_t note)
 {
 	log_ev('F', port, ch, note, 0);

@@ -34,6 +34,11 @@ void hal_send_note_on2(u8 port, u8 ch, u8 note, u16 velocity)
 	printf("...hal_send_note_on2(%d, %d, %d, 0x%4.4x);\n", port, ch, note, velocity);
 }
 
+void hal_send_note_on2_pitch(u8 port, u8 ch, u8 note, u16 velocity, u16 pitch79)
+{
+	printf("...hal_send_note_on2_pitch(%d, %d, %d, 0x%4.4x, 0x%4.4x);\n", port, ch, note, velocity, pitch79);
+}
+
 void hal_send_note_off2(u8 port, u8 ch, u8 note, u16 velocity)
 {
 	printf("...hal_send_note_off2(%d, %d, %d, 0x%4.4x);\n", port, ch, note, velocity);

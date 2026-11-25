@@ -14,6 +14,9 @@ uint32_t ump_scale_down(uint32_t v, uint8_t src_bits, uint8_t dst_bits);
 
 /* MIDI 2.0 channel voice (MT 4) encoders; return words written (2). */
 uint8_t ump_m2_note_on(uint32_t out[2], uint8_t group, uint8_t ch, uint8_t note, uint16_t vel);
+/* Note On with an attribute (type 3: Pitch 7.9, data = semitones * 512) */
+uint8_t ump_m2_note_on_attr(uint32_t out[2], uint8_t group, uint8_t ch, uint8_t note, uint16_t vel,
+                            uint8_t attr_type, uint16_t attr);
 uint8_t ump_m2_note_off(uint32_t out[2], uint8_t group, uint8_t ch, uint8_t note, uint16_t vel);
 uint8_t ump_m2_poly_pressure(uint32_t out[2], uint8_t group, uint8_t ch, uint8_t note, uint32_t value);
 uint8_t ump_m2_channel_pressure(uint32_t out[2], uint8_t group, uint8_t ch, uint32_t value);

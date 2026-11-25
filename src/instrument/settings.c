@@ -1,15 +1,17 @@
 #include "instrument/settings.h"
 #include "instrument/io.h"
 #include "scales/scales.h"
+#include "scales/tuning.h"
 #include <string.h>
 
-#define FIELDS 12
+#define FIELDS 15
 
 static struct settings g_saved;
 static uint32_t g_touch;
 
 void settings_defaults(struct settings *s)
 {
+	memset(s, 0, sizeof *s); /* padding too: settings are compared with memcmp */
 	s->root = 0;
 	s->scale = 0;
 	s->octave = 4;
@@ -22,11 +24,24 @@ void settings_defaults(struct settings *s)
 	s->din_mirror = 0;
 	s->channel = 0;
 	s->pressure_smoothing = SMOOTH_LIGHT;
+	s->tuning = TUNING_DEFAULT_ID;
+	s->a4_tenths = A4_TENTHS_DEFAULT;
+}
+
+uint8_t settings_scale_for(uint8_t tuning, uint8_t scale)
+{
+	const struct tuning_def *t = tuning_get(tuning);
+
+	return tuning_offers(t, scale) ? scale : t->default_scale;
 }
 
 uint8_t settings_valid(const struct settings *s)
 {
-	return s->root < 12 && s->scale < SCALE_COUNT && s->octave < 8 &&
+	const struct tuning_def *t = tuning_find(s->tuning);
+
+	return t && tuning_offers(t, s->scale) &&
+	       s->a4_tenths >= A4_TENTHS_MIN && s->a4_tenths <= A4_TENTHS_MAX &&
+	       s->root < 12 && s->scale < SCALE_COUNT && s->octave < 8 &&
 	       s->layout < LAYOUT_COUNT && s->absolute_root <= 1 &&
 	       s->din_mirror <= 1 && s->velocity_mode < 4 &&
 	       s->velocity_curve < 3 && s->pressure_mode < 3 &&
@@ -48,6 +63,9 @@ static void to_bytes(const struct settings *s, uint8_t *b)
 	b[9] = s->din_mirror;
 	b[10] = s->channel;
 	b[11] = s->pressure_smoothing;
+	b[12] = s->tuning;
+	b[13] = (uint8_t)(s->a4_tenths & 0xFF);
+	b[14] = (uint8_t)(s->a4_tenths >> 8);
 }
 
 void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
@@ -59,7 +77,7 @@ void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
 	out[1] = 'P';
 	out[2] = 'M';
 	out[3] = '2';
-	out[4] = 2;
+	out[4] = 3;
 	to_bytes(s, out + 5);
 	for (i = 0; i < SETTINGS_RECORD_LEN - 1; i++)
 		sum = (uint8_t)(sum + out[i]);
@@ -74,8 +92,10 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 
 	if (in[0] != 'L' || in[1] != 'P' || in[2] != 'M' || in[3] != '2')
 		return 0;
-	if (in[4] == 2)
+	if (in[4] == 3)
 		len = SETTINGS_RECORD_LEN;
+	else if (in[4] == 2)
+		len = SETTINGS_RECORD_V2_LEN;
 	else if (in[4] == 1)
 		len = SETTINGS_RECORD_V1_LEN;
 	else
@@ -84,6 +104,7 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 		sum = (uint8_t)(sum + in[i]);
 	if (sum != 0)
 		return 0;
+	settings_defaults(&t);
 	t.root = in[5];
 	t.scale = in[6];
 	t.octave = in[7];
@@ -95,7 +116,11 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 	t.pressure_threshold = in[13];
 	t.din_mirror = in[14];
 	t.channel = in[15];
-	t.pressure_smoothing = len == SETTINGS_RECORD_LEN ? in[16] : SMOOTH_LIGHT;
+	t.pressure_smoothing = len >= SETTINGS_RECORD_V2_LEN ? in[16] : SMOOTH_LIGHT;
+	if (len == SETTINGS_RECORD_LEN) {
+		t.tuning = in[17];
+		t.a4_tenths = (uint16_t)(in[18] | (in[19] << 8));
+	}
 	if (!settings_valid(&t))
 		return 0;
 	*s = t;

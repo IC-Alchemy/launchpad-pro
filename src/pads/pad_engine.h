@@ -33,6 +33,13 @@ typedef void (*pe_sounding_fn)(uint8_t pitch, uint8_t sounding);
 typedef int16_t (*pe_target_fn)(uint8_t pad, uint8_t *ch, uint8_t *din_mirror);
 void pe_set_target(pe_target_fn fn);
 
+/* Intonation: called at each pitch's Note On with its note number. Return 1
+ * and fill *pitch79 (MIDI 2.0 Pitch 7.9: semitones * 512) to send that pitch
+ * as a Note On attribute to Standalone (DIN gets the plain note), or 0 for a
+ * plain Note On. No hook (the default after pe_init, or NULL): plain. */
+typedef uint8_t (*pe_pitch_fn)(uint8_t note, uint16_t *pitch79);
+void pe_set_pitch(pe_pitch_fn fn);
+
 /* adc_buffer: the raw 12-bit buffer from app_init (ADC_MAP order).
  * Configuration starts at the settings defaults (peak-window, linear,
  * poly pressure, medium threshold). on_sounding may be NULL. */

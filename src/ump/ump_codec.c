@@ -45,8 +45,14 @@ static uint32_t m2_word0(uint8_t group, uint8_t status, uint8_t ch, uint8_t b2, 
 
 uint8_t ump_m2_note_on(uint32_t out[2], uint8_t group, uint8_t ch, uint8_t note, uint16_t vel)
 {
-	out[0] = m2_word0(group, 0x9, ch, note & 0x7F, 0);
-	out[1] = (uint32_t)vel << 16;
+	return ump_m2_note_on_attr(out, group, ch, note, vel, 0, 0);
+}
+
+uint8_t ump_m2_note_on_attr(uint32_t out[2], uint8_t group, uint8_t ch, uint8_t note, uint16_t vel,
+                            uint8_t attr_type, uint16_t attr)
+{
+	out[0] = m2_word0(group, 0x9, ch, note & 0x7F, attr_type);
+	out[1] = ((uint32_t)vel << 16) | attr;
 	return 2;
 }
 

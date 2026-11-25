@@ -68,8 +68,25 @@ white to show the page):
 | 7 | 72, 73, 75, 76, 77 | Root C#, D#, F#, G#, A# | green |
 | 6 | 61 to 67 | Root C, D, E, F, G, A, B | green |
 | 5 | 51 to 58 | Octave 0 to 7 | red |
-| 4, 3, 2 | 41 to 48, 31 to 38, 21 to 28 | Scales 1 to 24 (Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Diminished; Whole-half, Whole Tone, Minor Blues, Minor Pentatonic, Major Pentatonic, Harmonic Minor, Melodic Minor, Super Locrian; Bhairav, Hungarian Minor, Minor Gypsy, Hirojoshi, In-Sen, Iwato, Kumoi, Pelog) | blue |
-| 1 | 11 | Scale 25 (Spanish) | blue |
+| 4, 3, 2, 1 | 41 to 48, 31 to 38, 21 to 28, 11 to 17 | The scales the current tuning offers, in order. In the twelve-note tunings these are scales 1 to 31: Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Diminished; Whole-half, Whole Tone, Minor Blues, Minor Pentatonic, Major Pentatonic, Harmonic Minor, Melodic Minor, Super Locrian; Bhairav, Hungarian Minor, Minor Gypsy, Hirojoshi, In-Sen, Iwato, Kumoi, Pelog; Spanish, Phrygian Dominant, Lydian Dominant, Marwa Thaat, Poorvi Thaat, Todi Thaat, Chromatic. Other tunings show their own few scales from pad 41 on. | blue |
+
+Tuning page (button 97; 95, 96 and 97 show the page the same way):
+
+| Row | Pads | What | Colour |
+|---|---|---|---|
+| 8 | 81 to 88 | 12-EDO, 24, 19, 31, 22, 17, 15, 10-EDO | cyan |
+| 7 | 71 to 74 | 7-EDO, 5-EDO, 41-EDO, 53-EDO | cyan |
+| 7 | 75 to 78 | Just Intonation, Just: Harmonic 7, Pythagorean, Overtone 16-31 | yellow |
+| 6 | 61, 62 | Undertone 32-17, Partch 43-Tone | yellow |
+| 6 | 63 to 66 | 1/4-Comma Meantone, Werckmeister III, Kirnberger III, Vallotti | orange |
+| 6 | 67, 68 | 22 Shruti, 12 Svara JI | magenta |
+| 5 | 51 | Pythagorean Svara | magenta |
+| 5 | 52 to 55 | Bohlen-Pierce 13, Carlos Alpha, Carlos Beta, Carlos Gamma | violet |
+| 2 | 21, 22, 27, 28 | A4 −1 Hz, −0.1 Hz, +0.1 Hz, +1 Hz (415.0 to 466.0) | dim white |
+| 1 | 13 to 16 | A4 = 415.0 (Baroque), 432.0, 440.0, 442.0 Hz; the one in use is bright | white |
+
+Choosing a tuning keeps the scale if the tuning offers it, and otherwise moves
+to the tuning's first scale (Bhairav for the Indian twelve-note tunings).
 
 Options page (button 96), mostly white with a light hue per section (selected
 bright, others dim): velocity rows 7 and 8 warm, aftertouch rows 3, 5 and 6 cool
@@ -345,3 +362,43 @@ Fill in "Result" and "Notes". "Expected" is what I predict.
 - Any console output from the `midi` commands, including any command whose
   syntax differed from this document.
 - Anything odd: stuck notes, wrong colours, lost settings, hangs.
+
+## 18. Intonation (stage 2c)
+
+Use a MIDI 2.0 monitor that shows Note On attributes (MIDI2Sound's Live MIDI,
+or the Windows MIDI Services monitor), with the Launchpad in the MIDI 2.0
+Protocol (green Setup LED).
+
+1. **Default stays plain.** With 12-EDO and A4 = 440.0 (pad 15 bright on the
+   Tuning page), play a few pads. Expected: no attribute on any Note On.
+2. **A4 only.** Press pad 13 (415.0 Hz). Play pad 11 (C, note 60). Expected:
+   note 60 with attribute type 3, Pitch 7.9 0x75FA (58.99 semitones, about a semitone low).
+   Press pad 15 to go back to 440.0.
+3. **24-EDO.** Press pad 82. Close the menu. Expected: the Scale page now shows
+   five scales on row 4 (Maqam Rast first). With All Degrees (pad 45) and the
+   In-key sequential layout (pad 84), root C, octave 4, pad 11 sends note 60 with pitch 0x7800 and pad 12
+   sends note 61 with pitch 0x7900 (60.5 semitones).
+4. **A just tuning.** Press pad 75 (Just Intonation). Play E (pad 13 in Major,
+   In-key sequential, root C). Expected: note 64 with pitch 0x7FBA
+   (63.86 semitones, 14 cents flat).
+5. **Bohlen-Pierce.** Press pad 52. Expected: the scale moves to Bohlen-Pierce
+   Lambda. In-key sequential, root C: pad 11 sends note 60 (0x7800), pad 12
+   sends note 62 with pitch 0x7DDA (62.93 semitones, two Bohlen-Pierce steps of
+   about 146 cents).
+6. **Saved.** Unplug and plug in again. Expected: the tuning and A4 are kept.
+7. **MIDI 1.0 and DIN.** With DIN mirror on, or in the MIDI 1.0 Protocol,
+   expected: plain note numbers and no attribute.
+8. **From the PC.** In Alembic's Intonation page (or a PE editor), pick a
+   tuning. Expected: the Launchpad's Tuning page follows within a second, and
+   a change on the Launchpad shows in Alembic.
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 18.1 | 12-EDO at 440 | No attribute | | |
+| 18.2 | A4 415.0 | Attribute 0x75FA on note 60 | | |
+| 18.3 | 24-EDO | Five scales offered; 60 → 0x7800, 61 → 0x7900 | | |
+| 18.4 | Just Intonation | E = note 64, 0x7FBA | | |
+| 18.5 | Bohlen-Pierce | Pad 12 = note 62, 0x7DDA | | |
+| 18.6 | Survives unplug | Tuning and A4 restored | | |
+| 18.7 | MIDI 1.0 and DIN | Plain notes | | |
+| 18.8 | Two-way with Alembic | Changes follow both ways | | |

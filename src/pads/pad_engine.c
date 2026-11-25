@@ -99,6 +99,7 @@ static uint8_t g_smooth_k = 3;
 static ts_engine g_ts;
 static uint32_t g_now;
 static pe_target_fn g_target;
+static pe_pitch_fn g_pitch;
 
 static uint8_t slot_to_pad(uint8_t slot)
 {
@@ -190,7 +191,18 @@ static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
     pressure_start(p->t.sent, (uint16_t)now);
     p->sent12 = 0;
     p->sent7 = 0;
-    io_note_on(USBSTANDALONE, p->ch, p->pitch, vel);
+    {
+        uint16_t pitch79;
+
+        if (g_pitch != NULL && g_pitch(p->pitch, &pitch79))
+        {
+            io_note_on_pitch(USBSTANDALONE, p->ch, p->pitch, vel, pitch79);
+        }
+        else
+        {
+            io_note_on(USBSTANDALONE, p->ch, p->pitch, vel);
+        }
+    }
     if (p->din)
     {
         io_note_on(DINMIDI, p->ch, p->pitch, vel);
@@ -483,6 +495,7 @@ void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding)
     g_nheld = 0;
     g_ticked = 0;
     g_target = NULL;
+    g_pitch = NULL;
     ts_init(&g_ts);
     g_adc = adc_buffer;
     g_on_sounding = on_sounding;
@@ -510,6 +523,11 @@ void pe_set_smoothing(uint8_t smoothing)
 void pe_set_target(pe_target_fn fn)
 {
     g_target = fn;
+}
+
+void pe_set_pitch(pe_pitch_fn fn)
+{
+    g_pitch = fn;
 }
 
 void pe_press(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din_mirror, uint32_t now)

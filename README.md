@@ -18,6 +18,7 @@ Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launc
 | 1 | USB MIDI 2.0 transport: new descriptors (alt 0 MIDI 1.0, alt 1 UMP), Group Terminal Blocks, UMP stream discovery, DIN bridge | **Done, tested on hardware.** Results in `docs/checkpoint-1-results.md`. Three checks (5b, 6a, 6c) were deferred to stage 4. |
 | 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
 | 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
+| 2c | Intonation: Pico2Seq's 29 tunings (equal, just, historical temperaments, Indian, xenharmonic), 61 scales, Tuning page, A4 reference, MIDI 2.0 pitch attribute on notes | **Done and host-tested.** Hardware check pending (section 18 of `docs/checkpoint-2-instrument.md`). |
 | 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery, Endpoint Inquiry and Property Exchange (Get, Set, Subscribe) implemented and host-tested.** Hardware check with MIDI2Sound pending. |
 | 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
 
@@ -39,10 +40,17 @@ The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash marg
   window), Zero-latency (the library's peak at the press event), Two-stage
   (time to rise between two thresholds; aimed at the softest playing) and
   Fixed. Each has a Soft, Linear or Hard curve.
+- **Intonation.** 29 tunings from the Pico2Seq library: 12-EDO and 11 other
+  equal divisions (24, 19, 31, 22, 17, 15, 10, 7, 5, 41, 53), 6 just tunings,
+  4 historical temperaments, 3 Indian tunings, Bohlen-Pierce and the three
+  Carlos scales, plus an A4 reference from 415.0 to 466.0 Hz. Each tuning
+  offers its own scales: the twelve-note tunings offer the 31 classic scales,
+  the others their own sets (for example 24-EDO offers Rast, Bayati, Hijaz,
+  Saba and All Degrees). See "Notes in other tunings" below.
 - **Setup menu.** Tap Setup to open or close, hold it to peek. Button 95 opens
   the Scale page (root, scale, octave, layout, absolute root), button 96 opens
   the Options page (velocity mode and curve, pressure mode and threshold, DIN
-  mirror, MIDI channel). Settings are saved to flash 2 s after the last change,
+  mirror, MIDI channel), button 97 opens the Tuning page (tuning and A4). Settings are saved to flash 2 s after the last change,
   once no pad is being played.
 - **DIN.** The "MIDI Port" (UMP group 1) is bridged to the DIN MIDI ports in
   both directions. With DIN mirror on, pad notes and pressure also go to DIN
@@ -53,6 +61,18 @@ The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash marg
   product "Launchpad Pro MIDI 2.0" (the bootloader may add a suffix such as
   " 16"). UMP endpoint name "Launchpad Pro MIDI 2.0" with two Function Blocks,
   "Standalone Port" and "MIDI Port".
+
+### Notes in other tunings
+
+In a twelve-note tuning a pad plays the same note number as in 12-EDO, and
+only the pitch changes. In a tuning with another number of degrees,
+consecutive note numbers are consecutive degrees, counted from note
+60 + root (the usual keyboard mapping for microtonal synths): in 24-EDO note
+61 is a quarter tone above 60. In the MIDI 2.0 Protocol every Note On then
+carries the exact pitch as a Pitch 7.9 attribute (attribute type 3), so a
+MIDI 2.0 synth plays it in tune with no setup. The attribute is left off in
+12-EDO at A4 = 440.0 Hz. DIN and the MIDI 1.0 Protocol get the plain note
+number; a MIDI 1.0 synth needs the same tuning loaded to follow.
 
 The full pad map of the menu and every check to run on the hardware are in
 `docs/checkpoint-2-instrument.md`.
@@ -73,13 +93,16 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 | `ResourceList` | yes | | | The resources below, with JSON schemas for the two settings resources |
 | `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
 | `ChannelList` | yes | | | The Standalone Port and its MIDI channel |
-| `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 24), `octave` (0 to 7), `layout`, `absoluteRoot` |
+| `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 60), `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
 | `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
-| `X-ScaleList` | yes | | | The 25 scale names, in `scale` order |
+| `X-ScaleList` | yes | | | The 61 scale names, in `scale` order |
+| `X-TuningList` | yes | | | The 29 tunings: `id`, `name`, `degrees`, and `scales` (the scales it offers, in menu order; left out for twelve-note tunings, which offer scales 0 to 30) |
 
 A Set changes only the fields it gives and is applied like a change in the
 Setup menu (saved to flash 2 s later). One bad field rejects the whole Set with
-status 400. Each settings resource has one subscriber (the latest wins), which
+status 400, and so does a `scale` the tuning doesn't offer. A Set that changes
+`tuning` without a `scale` keeps the scale if the new tuning offers it, and
+otherwise moves to the tuning's default scale. Each settings resource has one subscriber (the latest wins), which
 gets a full notify when the settings change from the menu or from another
 initiator. Subscriptions end on USB reset, an alternate-setting change, or MUID
 invalidation.
@@ -194,7 +217,7 @@ work in both USB modes. The new API is in `include/midi2.h`.
 | `src/usb/` | USB descriptors (alt 0 and alt 1), class requests, EP1 endpoint handling, Group Terminal Blocks |
 | `src/ump/` | UMP encode/decode, transmit queue, receive path, stream discovery replies |
 | `src/pads/` | Velocity math and curves, the pad engine (notes, pressure), Two-stage detector |
-| `src/scales/` | Scale table, layouts, pad colour roles |
+| `src/scales/` | Scale table, layouts, pad colour roles, the tuning library (`tuning_data.c` is generated from Pico2Seq) |
 | `src/instrument/` | Settings model and flash record, the menu/play UI |
 | `src/platform/` | Access to library internals (raw ADC, pad calibration, interrupts) |
 | `tests/` | Host unit tests (`make test`) |

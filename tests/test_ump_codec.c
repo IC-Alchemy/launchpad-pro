@@ -38,6 +38,8 @@ static void test_encoders(void)
 	uint32_t w[2];
 	CHECK_EQ(ump_m2_note_on(w, 0, 0, 60, 0xFFFF), 2);
 	CHECK_EQ(w[0], 0x40903C00u); CHECK_EQ(w[1], 0xFFFF0000u);
+	CHECK_EQ(ump_m2_note_on_attr(w, 0, 1, 64, 0x8000, 3, 62 * 512), 2);
+	CHECK_EQ(w[0], 0x40914003u); CHECK_EQ(w[1], 0x80007C00u);
 	ump_m2_note_off(w, 1, 2, 60, 0);  CHECK_EQ(w[0], 0x41823C00u);
 	ump_m2_poly_pressure(w, 0, 0, 60, 0x12345678u);
 	CHECK_EQ(w[0], 0x40A03C00u); CHECK_EQ(w[1], 0x12345678u);

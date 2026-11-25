@@ -3,7 +3,15 @@
 
 #include <stdint.h>
 
-#define SCALE_COUNT 25
+/* 0..30 are twelve-note scales (semitone steps), offered by every
+ * twelve-note tuning; 31 is All Degrees (every degree of any tuning); 32..60
+ * are Pico2Seq's tuned scales, whose steps are degrees of one tuning.
+ * Indexes are part of the saved settings and of X-ScaleSettings: append
+ * only. */
+#define SCALE_COUNT 61
+#define SCALE_TWELVE_COUNT 31
+#define SCALE_CHROMATIC 30
+#define SCALE_ALL_DEGREES 31
 
 enum layout {
 	LAYOUT_INKEY_4THS,
@@ -18,24 +26,28 @@ enum role { ROLE_OFF, ROLE_OUT, ROLE_SCALE, ROLE_HIGHLIGHT, ROLE_ROOT };
 
 struct scale_def {
 	const char *name;
-	uint8_t n;
-	uint8_t steps[8];
+	uint8_t n;          /* steps; 0: All Degrees (every degree of the tuning) */
+	uint8_t degrees;    /* 0: steps are semitone slots; else steps are degrees
+	                     * of a tuning with this many per period */
+	uint8_t steps[12];
 };
 
 extern const struct scale_def SCALES[SCALE_COUNT];
 
 struct scale_ctx {
 	uint8_t root;          /* 0..11 */
-	uint8_t scale;         /* index into SCALES */
+	uint8_t scale;         /* index into SCALES, offered by the tuning */
 	uint8_t octave;        /* 0..7 */
 	uint8_t layout;        /* enum layout */
 	uint8_t absolute_root; /* nonzero: pads keep absolute pitch when root changes */
+	uint8_t tuning;        /* tuning id (scales/tuning.h) */
 };
 
-/* Pitch of a grid pad (11..88), or -1 if not a grid pad or outside 0..127. */
+/* Note number of a grid pad (11..88), or -1 if not a grid pad or outside
+ * 0..127. Note numbers are degree numbers: see scales/tuning.h. */
 int16_t scale_pad_pitch(const struct scale_ctx *c, uint8_t pad);
 
-/* Colour role of a pitch within the scale; ROLE_OFF for -1. */
+/* Colour role of a note within the scale; ROLE_OFF for -1. */
 enum role scale_pitch_role(const struct scale_ctx *c, int16_t pitch);
 
 #endif
