@@ -1,6 +1,7 @@
 // Host simulator stand-ins for the USB MIDI 2.0 API (include/midi2.h) and the
 // vendor library's ADC_Max.  ump_scale_up comes from src/ump/ump_codec.c.
 
+#include "midici/responder.h"
 #include <stdio.h>
 #include "app.h"
 #include "midi2.h"
@@ -64,4 +65,11 @@ void sim_run_main_loop_hook(void)
 {
 	if (main_loop_hook)
 		main_loop_hook();
+}
+
+/* MIDI-CI is firmware-only: the simulator has no USB, so nothing to bind. */
+void midici_pe_bind(midici_settings_get_fn get, midici_settings_apply_fn apply)
+{
+	(void)get;
+	(void)apply;
 }

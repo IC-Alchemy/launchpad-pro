@@ -21,7 +21,7 @@
 
 #define FB_COUNT 2
 
-static const char EP_NAME[] = "Launchpad Pro MIDI 2.0";
+static const char EP_NAME[] = CI_ENDPOINT_NAME;
 static const char *const FB_NAMES[FB_COUNT] = {"Standalone Port", "MIDI Port"};
 /* word0 low 16 bits: active | FB number, then UI hint / MIDI 1.0 / direction. */
 static const uint16_t FB_WORD0[FB_COUNT] = {0x8033, 0x813B};

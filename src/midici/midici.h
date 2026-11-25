@@ -48,6 +48,8 @@ int midici_send_sysex(uint8_t group, const uint8_t *data, uint16_t len);
 
 /* Packets still waiting in CiTxQueue (main loop). */
 uint16_t midici_tx_pending(void);
+/* Free CiTxQueue packets (main loop): a message of n payload bytes needs (n + 5) / 6. */
+uint16_t midici_tx_free_packets(void);
 
 /* USB TX path: moves up to max_packets queued packets into the UMP TX control
  * ring (stopping early if it has no room). Returns the number moved. */

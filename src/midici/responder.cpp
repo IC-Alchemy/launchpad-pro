@@ -1,5 +1,6 @@
 #include "midici/responder.h"
 #include "midici/ci_identity.h"
+#include "midici/pe_session.h"
 #include "vendor/MidiCiResponder.h"
 
 extern "C" {
@@ -18,6 +19,7 @@ constexpr uint8_t kMidiPortGroup = 1;
 
 ms::Responder responder;
 bool initialized;
+char piid[25];	/* Product Instance ID: Endpoint Reply and DeviceInfo serialNumber */
 volatile bool notify_pending;	/* Function Block 0 info must be re-sent: the MUID changed */
 
 uint32_t replace_muid(uint32_t previous)
@@ -44,9 +46,10 @@ void init_responder()
 	config.SoftwareRevisionLevel[3] = CI_SW_REV_3;
 	config.ReceivableMaximumSysExSize = CI_REASSEMBLY_BYTES;
 	config.FunctionBlockNumber = 0;
-	char id[25];
-	platform_product_instance_id(id);
-	for (const char *p = id; *p; ++p)
+	config.SupportsPropertyExchange = true;
+	config.SimultaneousPropertyRequests = 1;
+	platform_product_instance_id(piid);
+	for (const char *p = piid; *p; ++p)
 		config.ProductInstanceId[config.ProductInstanceIdByteCount++] = static_cast<uint8_t>(*p);
 	responder.Initialize(config);
 	initialized = true;
@@ -98,15 +101,31 @@ size_t respond(const uint8_t *payload, size_t len, uint8_t *out, size_t capacity
 
 	if (version == ms::MessageVersion11)
 		message.OutputPathId = 0;
+	if (message.Type == T::Discovery)
+		lp_pe::note_initiator(message.SourceMuid,
+			ms::ReadMuid(payload + ms::CommonHeaderByteCount + 12));	/* Receivable Maximum SysEx Size */
+	if (ms::MessageTypeCarriesPropertyExchangeData(message.Type)) {
+		/* Property Exchange is ours (pe_session.cpp), on the Function Block only */
+		if (message.DeviceId != ms::DeviceIdFunctionBlock)
+			return inquiry ? build_nak(message, ms::NakStatusMessageNotSupported, out, capacity) : 0;
+		if (!message.HasPropertyExchangeFields)
+			return inquiry ? build_nak(message, ms::NakStatusMessageMalformed, out, capacity) : 0;
+		lp_pe::handle(message, payload, len, responder.Muid(), piid);
+		return 0;
+	}
 	/* M2-101 requires one outgoing format per MUID. The upstream responder
 	 * mirrors the incoming version, so give it ours after parsing the wire form. */
 	message.VersionFormat = MIDI_CI_VERSION;
 	const uint32_t previous = responder.Muid();
 	size_t bytes = 0;
 	const auto action = responder.ProcessMessage(message, out, capacity, &bytes);
+	if (action == ms::ResponderAction::InitiatorMuidInvalidated)
+		lp_pe::forget_initiator(message.TargetMuid);
 	if (action == ms::ResponderAction::MuidInvalidated || action == ms::ResponderAction::MuidCollision) {
 		responder.SetMuid(replace_muid(previous));
 		muid_changed = true;
+		/* subscriptions and requests were made to the MUID we just gave up */
+		lp_pe::request_reset();
 		if (action == ms::ResponderAction::MuidCollision) {
 			/* The target is the colliding ID. Use our replacement as source
 			 * so peers such as MIDI2Sound don't discard it as their own echo. */
@@ -159,6 +178,12 @@ extern "C" void midici_responder_init(void)
 extern "C" void midici_responder_reset(void)
 {
 	notify_pending = false;
+	lp_pe::request_reset();
+}
+
+extern "C" void midici_pe_bind(midici_settings_get_fn get, midici_settings_apply_fn apply)
+{
+	lp_pe::bind(get, apply);
 }
 
 extern "C" void midici_responder_poll(void)
@@ -167,4 +192,6 @@ extern "C" void midici_responder_poll(void)
 	 * host before the Function Block notification that follows it. */
 	if (notify_pending && midici_tx_pending() == 0 && ump_stream_notify_function_block(0) == 0)
 		notify_pending = false;
+	if (initialized && !notify_pending)
+		lp_pe::poll(responder.Muid(), piid);
 }

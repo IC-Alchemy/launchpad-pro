@@ -38,6 +38,7 @@
 #include "app.h"
 #include "midi2.h"
 #include "instrument/ui.h"
+#include "midici/responder.h"
 #include "pads/pad_engine.h"
 #include "platform/pads.h"
 
@@ -70,6 +71,12 @@ static void check_transport(void)
         g_usb_midi2 = m;
         ui_transport_changed(g_ms);
     }
+}
+
+// MIDI-CI Property Exchange Set: applied exactly like a device menu change
+static void pe_apply_settings(const struct settings *s)
+{
+    ui_apply_settings(s, g_ms);
 }
 
 static void main_loop(void)
@@ -147,5 +154,6 @@ void app_init(const u16 *adc_raw)
     pad_setcalibration(PAD_LIB_THRESHOLD, 1023, 512, 769);
     pe_init(adc_raw, ui_on_sounding);
     ui_init(g_ms);
+    midici_pe_bind(ui_settings, pe_apply_settings);
     midi2_set_main_loop_hook(main_loop);
 }

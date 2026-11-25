@@ -18,7 +18,7 @@ Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launc
 | 1 | USB MIDI 2.0 transport: new descriptors (alt 0 MIDI 1.0, alt 1 UMP), Group Terminal Blocks, UMP stream discovery, DIN bridge | **Done, tested on hardware.** Results in `docs/checkpoint-1-results.md`. Three checks (5b, 6a, 6c) were deferred to stage 4. |
 | 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
 | 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
-| 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery and Endpoint Inquiry implemented and host-tested.** Property Exchange is pending. |
+| 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery, Endpoint Inquiry and Property Exchange (Get, Set, Subscribe) implemented and host-tested.** Hardware check with MIDI2Sound pending. |
 | 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
 
 The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash margin.
@@ -60,16 +60,39 @@ The full pad map of the menu and every check to run on the hardware are in
 ## MIDI-CI with MIDI2Sound
 
 The Standalone Function Block supports MIDI-CI 1.2 over USB UMP. It answers
-Discovery and Product Instance ID inquiries and handles MUID invalidation,
-collisions, and negative acknowledgments. Discovery advertises zero optional
-capability categories. The Windows UI calls UMP group 0 **Group 1**.
+Discovery and Product Instance ID inquiries, handles MUID invalidation,
+collisions, and negative acknowledgments, and supports Property Exchange
+(Common Rules for PE 1.1). Discovery advertises Property Exchange only; Profiles
+and Process Inquiry are not supported. The Windows UI calls UMP group 0
+**Group 1**.
+
+Property Exchange resources, one request at a time, messages up to 320 bytes:
+
+| Resource | Get | Set | Subscribe | What it holds |
+|---|---|---|---|---|
+| `ResourceList` | yes | | | The resources below, with JSON schemas for the two settings resources |
+| `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
+| `ChannelList` | yes | | | The Standalone Port and its MIDI channel |
+| `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 24), `octave` (0 to 7), `layout`, `absoluteRoot` |
+| `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold`, `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
+| `X-ScaleList` | yes | | | The 25 scale names, in `scale` order |
+
+A Set changes only the fields it gives and is applied like a change in the
+Setup menu (saved to flash 2 s later). One bad field rejects the whole Set with
+status 400. Each settings resource has one subscriber (the latest wins), which
+gets a full notify when the settings change from the menu or from another
+initiator. Subscriptions end on USB reset, an alternate-setting change, or MUID
+invalidation.
 
 On Windows, select the Launchpad endpoint in MIDI2Sound using Windows MIDI
 Services, open **MIDI-CI**, and click **DISCOVER**. Expect one reply on Group 1
-with Function Block 0, MIDI-CI format 2, and a Product Instance ID matching the
-UMP endpoint. In Live MIDI, press and release a pad and vary its pressure to
-check MIDI 2.0 note and pressure messages. The MIDI2Sound CLI can also run
-`midi_monitor_cli --ci-discover --endpoint Launchpad --all-groups`.
+with Function Block 0, MIDI-CI format 2, Property Exchange in its categories,
+a Product Instance ID matching the UMP endpoint, and ResourceList and
+DeviceInfo with status 200. In Live MIDI, press and release a pad and vary its
+pressure to check MIDI 2.0 note and pressure messages. The MIDI2Sound CLI can
+also run `midi_monitor_cli --ci-discover --endpoint Launchpad --all-groups`.
+MIDI2Sound only reads Property Exchange; to try Set and Subscribe, use a PE
+editor such as the MIDI 2.0 Workbench.
 
 The firmware reuses the same [MIT-licensed Microsoft MIDI-CI headers](src/midici/vendor/README.md)
 as MIDI2Sound.

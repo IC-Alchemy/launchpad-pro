@@ -3,11 +3,15 @@
 #include "usb/usb_compat.h"
 #include "usb/usb_midi2.h"
 #include "midici/midici.h"
+#include "midici/responder.h"
+#include "midici/ci_pe.h"
+#include "instrument/settings.h"
 #include "platform/lib_private.h"
 #include "ump/ump.h"
 #include "midi2.h"
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 void EP1_OUT_Callback(void);
 void __wrap_midi_parsers_init(void);
@@ -146,7 +150,7 @@ static void test_ci_discovery_endpoint_and_version(void)
 	CHECK_MEM(reply.buf + 10, ci_discovery + 6, 4);
 	const uint8_t identity[] = {0, 0x20, 0x29, 0x51, 0, 0, 0, 0, 1, 0, 0};
 	CHECK_MEM(reply.buf + 14, identity, sizeof(identity));
-	CHECK_EQ(reply.buf[25], 0); /* no Profile, PE or Process Inquiry */
+	CHECK_EQ(reply.buf[25], 0x08); /* Property Exchange only: no Profiles or Process Inquiry */
 	CHECK_EQ(reply.buf[26] + (reply.buf[27] << 7), CI_REASSEMBLY_BYTES);
 	CHECK_EQ(reply.buf[30], 7); /* initiator Output Path ID */
 	CHECK_EQ(reply.buf[31], 0); /* Standalone Function Block */
@@ -180,7 +184,7 @@ static void test_ci_discovery_endpoint_and_version(void)
 static void test_ci_nak_address_and_sysex_limit(void)
 {
 	struct ump_sysex7_rx reply;
-	uint8_t inquiry[128] = {0xF0, 0x7E, 0x7F, 0x0D, 0x30, 2, 1, 2, 3, 4};
+	uint8_t inquiry[128] = {0xF0, 0x7E, 0x7F, 0x0D, 0x20, 2, 1, 2, 3, 4}; /* Profile Inquiry: not supported */
 	enter_alt1();
 	ci_discover(&reply);
 	memcpy(inquiry + 10, reply.buf + 6, 4);
@@ -189,7 +193,7 @@ static void test_ci_nak_address_and_sysex_limit(void)
 	host_in_ci(&reply, 0);
 	CHECK_EQ(reply.len, 25);
 	CHECK_EQ(reply.buf[4], 0x7F);
-	CHECK_EQ(reply.buf[14], 0x30);
+	CHECK_EQ(reply.buf[14], 0x20);
 	CHECK_EQ(reply.buf[15], 0x01);
 
 	inquiry[5] = 0x22; /* reserved version bits */
@@ -260,6 +264,452 @@ static void test_ci_reply_retries_and_is_discarded_on_alt_change(void)
 	enter_alt1();
 	__wrap_midi_parsers_poll();
 	CHECK_EQ(host_in(packet), 0);
+}
+
+/* ---- MIDI-CI Property Exchange, end to end over USB ---- */
+
+#define PE_MSGS 12
+static struct ump_sysex7_rx pe_rx[PE_MSGS];
+static uint8_t pe_count;
+static uint8_t pe_muid[4];	/* the device's MUID, from its Discovery Reply */
+static const uint8_t PE_ME[4] = {1, 2, 3, 4};	/* ci_discovery's initiator */
+static const uint8_t PE_OTHER[4] = {5, 6, 7, 8};
+
+static struct settings fake_s;
+static int fake_applies;
+static const struct settings *fake_get(void) { return &fake_s; }
+static void fake_apply(const struct settings *s) { fake_s = *s; fake_applies++; }
+
+/* every complete SysEx message the device sends until it goes quiet */
+static void host_in_pe(void)
+{
+	struct ump_sysex7_rx cur;
+	uint32_t words[16];
+	pe_count = 0;
+	ump_sysex7_rx_reset(&cur);
+	for (uint16_t count;;) {
+		if ((count = host_in(words)) == 0) {
+			__wrap_midi_parsers_poll();
+			if ((count = host_in(words)) == 0)
+				break;
+		}
+		for (uint16_t i = 0; i < count; i += ump_word_count(words[i])) {
+			if (words[i] >> 28 != 3)
+				continue;
+			CHECK_EQ((words[i] >> 24) & 0xF, 0);
+			int r = ump_sysex7_rx_feed(&cur, words + i);
+			CHECK(r >= 0);
+			if (r == 1) {
+				CHECK(pe_count < PE_MSGS);
+				if (pe_count < PE_MSGS)
+					pe_rx[pe_count++] = cur;
+				ump_sysex7_rx_reset(&cur);
+			}
+		}
+	}
+	CHECK_EQ(cur.active, 0);
+}
+
+struct pe_view {
+	uint8_t type, req;
+	const uint8_t *src, *dst;
+	const char *hdr, *data;
+	uint16_t hdr_len, count, num, data_len;
+};
+
+static void pe_view(const struct ump_sysex7_rx *m, struct pe_view *v)
+{
+	const uint8_t *b = m->buf;
+	uint16_t p;
+	memset(v, 0, sizeof *v);
+	CHECK(m->len >= 24);
+	if (m->len < 24)
+		return;
+	CHECK_EQ(b[1], 0x7E);
+	CHECK_EQ(b[2], 0x7F);
+	v->type = b[4];
+	v->src = b + 6;
+	v->dst = b + 10;
+	v->req = b[14];
+	v->hdr_len = (uint16_t)(b[15] | b[16] << 7);
+	v->hdr = (const char *)b + 17;
+	p = (uint16_t)(17 + v->hdr_len);
+	v->count = (uint16_t)(b[p] | b[p + 1] << 7);
+	v->num = (uint16_t)(b[p + 2] | b[p + 3] << 7);
+	v->data_len = (uint16_t)(b[p + 4] | b[p + 5] << 7);
+	v->data = (const char *)b + p + 6;
+	CHECK_EQ(p + 6 + v->data_len + 1, m->len);
+}
+
+static void pe_send_from(const uint8_t src[4], uint8_t type, uint8_t req, const char *hdr, uint16_t count,
+                         uint16_t num, const char *data, uint16_t dlen)
+{
+	static uint8_t b[400];
+	uint16_t n = 0, hl = (uint16_t)strlen(hdr);
+	b[n++] = 0xF0; b[n++] = 0x7E; b[n++] = 0x7F; b[n++] = 0x0D; b[n++] = type; b[n++] = 2;
+	memcpy(b + n, src, 4); n += 4;
+	memcpy(b + n, pe_muid, 4); n += 4;
+	b[n++] = req;
+	b[n++] = hl & 0x7F; b[n++] = (uint8_t)(hl >> 7);
+	memcpy(b + n, hdr, hl); n += hl;
+	b[n++] = count & 0x7F; b[n++] = (uint8_t)(count >> 7);
+	b[n++] = num & 0x7F; b[n++] = (uint8_t)(num >> 7);
+	b[n++] = dlen & 0x7F; b[n++] = (uint8_t)(dlen >> 7);
+	memcpy(b + n, data, dlen); n += dlen;
+	b[n++] = 0xF7;
+	host_out_sysex(0, b, n);
+}
+
+static void pe_send(uint8_t type, uint8_t req, const char *hdr, const char *body)
+{
+	pe_send_from(PE_ME, type, req, hdr, 1, 1, body, (uint16_t)strlen(body));
+}
+
+/* Reassembles a reply of `type` to `req` from pe_rx; header to hdr (NUL-ended),
+ * body to body; returns the body length. Every message <= limit bytes. */
+static uint16_t pe_reply(uint8_t type, uint8_t req, const uint8_t to[4], uint16_t limit, char *hdr, char *body,
+                         uint16_t cap)
+{
+	struct pe_view v;
+	uint16_t len = 0, count = 0;
+	CHECK(pe_count > 0);
+	for (uint8_t i = 0; i < pe_count; i++) {
+		pe_view(&pe_rx[i], &v);
+		CHECK(pe_rx[i].len <= limit);
+		CHECK_EQ(v.type, type);
+		CHECK_EQ(v.req, req);
+		CHECK_MEM(v.src, pe_muid, 4);
+		CHECK_MEM(v.dst, to, 4);
+		CHECK_EQ(v.num, i + 1);
+		if (i == 0) {
+			count = v.count;
+			memcpy(hdr, v.hdr, v.hdr_len);
+			hdr[v.hdr_len] = 0;
+		} else {
+			CHECK_EQ(v.hdr_len, 0);
+			CHECK_EQ(v.count, count);
+		}
+		if (len + v.data_len <= cap) {
+			memcpy(body + len, v.data, v.data_len);
+			len = (uint16_t)(len + v.data_len);
+		}
+	}
+	CHECK_EQ(pe_count, count);
+	if (len < cap)
+		body[len] = 0;
+	return len;
+}
+
+static uint16_t pe_render(uint8_t res, const struct settings *s, const char *piid, char *buf, uint16_t cap)
+{
+	struct ci_json_out o;
+	ci_json_out_init(&o, buf, 0, cap);
+	ci_pe_render(res, s, piid, &o);
+	if (o.pos < cap)
+		buf[o.pos] = 0;
+	return o.pos;
+}
+
+/* alt 1, discovered by PE_ME with the given receivable SysEx size; settings bound or not */
+static void pe_setup(uint16_t max_sysex, int bound)
+{
+	struct ump_sysex7_rx reply;
+	uint8_t discovery[sizeof(ci_discovery)];
+	enter_alt1();
+	settings_defaults(&fake_s);
+	fake_applies = 0;
+	if (bound)
+		midici_pe_bind(fake_get, fake_apply);
+	else
+		midici_pe_bind(0, 0);
+	memcpy(discovery, ci_discovery, sizeof discovery);
+	discovery[26] = max_sysex & 0x7F;
+	discovery[27] = (max_sysex >> 7) & 0x7F;
+	discovery[28] = (max_sysex >> 14) & 0x7F;
+	host_out_sysex(0, discovery, sizeof discovery);
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.buf[4], 0x71);
+	CHECK_EQ(reply.buf[25], 0x08);
+	memcpy(pe_muid, reply.buf + 6, 4);
+}
+
+static void test_ci_pe_capabilities_and_get(void)
+{
+	static char hdr[64], body[2048], want[2048];
+	uint16_t n;
+
+	pe_setup(4096, 0);
+	/* PE Capabilities, as MIDI2Sound sends it (version 2: simultaneous, major, minor) */
+	{
+		uint8_t caps[] = {0xF0, 0x7E, 0x7F, 0x0D, 0x30, 2, 1, 2, 3, 4, 0, 0, 0, 0, 1, 0, 0, 0xF7};
+		memcpy(caps + 10, pe_muid, 4);
+		host_out_sysex(0, caps, sizeof caps);
+	}
+	host_in_pe();
+	CHECK(pe_count >= 1);
+	CHECK_EQ(pe_rx[pe_count - 1].buf[4], 0x31);
+	CHECK_EQ(pe_rx[pe_count - 1].buf[14], 1);	/* one request at a time */
+
+	/* ResourceList: several chunks, each <= 320 bytes, reassembling to the resource */
+	pe_send(0x34, 5, "{\"resource\":\"ResourceList\"}", "");
+	host_in_pe();
+	CHECK(pe_count > 1);
+	n = pe_reply(0x35, 5, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	CHECK_EQ(n, pe_render(CI_PE_RESOURCE_LIST, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, n);
+
+	/* DeviceInfo: one chunk, serialNumber is the Product Instance ID */
+	pe_send(0x34, 6, "{\"resource\":\"DeviceInfo\"}", "");
+	host_in_pe();
+	CHECK_EQ(pe_count, 1);
+	n = pe_reply(0x35, 6, PE_ME, 320, hdr, body, sizeof body);
+	CHECK_EQ(n, pe_render(CI_PE_DEVICE_INFO, &fake_s, "TEST0001", want, sizeof want));
+	CHECK_MEM(body, want, n);
+	CHECK(strstr(body, "\"serialNumber\":\"TEST0001\"") != 0);
+
+	/* errors */
+	pe_send(0x34, 7, "{\"resource\":\"ProgramList\"}", "");
+	host_in_pe();
+	pe_reply(0x35, 7, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":404}") == 0);
+	pe_send(0x34, 8, "{\"resource\":\"X-ScaleSettings\"}", "");	/* nothing bound */
+	host_in_pe();
+	pe_reply(0x35, 8, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":404}") == 0);
+	pe_send(0x34, 9, "{\"resourceId\":\"x\"}", "");
+	host_in_pe();
+	pe_reply(0x35, 9, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+	pe_send(0x34, 10, "{\"resource\":", "");
+	host_in_pe();
+	pe_reply(0x35, 10, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+	pe_send_from(PE_ME, 0x34, 11, "{\"resource\":\"DeviceInfo\"}", 2, 1, "", 0);
+	host_in_pe();
+	pe_reply(0x35, 11, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+}
+
+static void test_ci_pe_small_initiator_and_terminate(void)
+{
+	static char hdr[64], body[2048], want[2048];
+	uint16_t n;
+
+	/* an initiator that takes 128-byte SysEx gets 128-byte chunks */
+	pe_setup(128, 1);
+	pe_send(0x34, 1, "{\"resource\":\"X-ScaleList\"}", "");
+	host_in_pe();
+	n = pe_reply(0x35, 1, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(pe_count > 2);
+	CHECK_EQ(n, pe_render(CI_PE_SCALE_LIST, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, n);
+
+	/* Notify 144 (terminate) stops a reply part way */
+	pe_setup(4096, 1);
+	pe_send(0x34, 2, "{\"resource\":\"ResourceList\"}", "");
+	pe_send(0x3F, 2, "{\"status\":144}", "");
+	host_in_pe();
+	struct pe_view v;
+	pe_view(&pe_rx[0], &v);
+	CHECK(pe_count >= 1);
+	CHECK(pe_count < v.count);
+	for (int i = 0; i < 3; i++)
+		__wrap_midi_parsers_poll();
+	host_in_pe();
+	CHECK_EQ(pe_count, 0);
+}
+
+static void test_ci_pe_set(void)
+{
+	static char hdr[64], body[512], want[512];
+	struct settings before;
+
+	pe_setup(4096, 1);
+	fake_s.octave = 2;
+	/* Get the bound settings */
+	pe_send(0x34, 1, "{\"resource\":\"X-PlayOptions\"}", "");
+	host_in_pe();
+	uint16_t n = pe_reply(0x35, 1, PE_ME, 320, hdr, body, sizeof body);
+	CHECK_EQ(n, pe_render(CI_PE_PLAY_OPTIONS, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, n);
+
+	/* a full Set: given fields change, the rest stay */
+	pe_send(0x36, 2, "{\"resource\":\"X-ScaleSettings\"}", "{\"root\":5,\"layout\":\"inKey3rds\"}");
+	host_in_pe();
+	CHECK_EQ(pe_count, 1);
+	pe_reply(0x37, 2, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	CHECK_EQ(fake_applies, 1);
+	CHECK_EQ(fake_s.root, 5);
+	CHECK_EQ(fake_s.layout, 1);
+	CHECK_EQ(fake_s.octave, 2);
+
+	/* rejected Sets change nothing */
+	before = fake_s;
+	pe_send(0x36, 3, "{\"resource\":\"X-ScaleSettings\"}", "{\"root\":4,\"octave\":9}");
+	host_in_pe();
+	pe_reply(0x37, 3, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+	pe_send(0x36, 4, "{\"resource\":\"X-ScaleSettings\",\"setPartial\":true}", "{\"root\":4}");
+	host_in_pe();
+	pe_reply(0x37, 4, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+	pe_send(0x36, 5, "{\"resource\":\"DeviceInfo\"}", "{}");
+	host_in_pe();
+	pe_reply(0x37, 5, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":405}") == 0);
+	pe_send(0x36, 6, "{\"resource\":\"X-Nope\"}", "{}");
+	host_in_pe();
+	pe_reply(0x37, 6, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":404}") == 0);
+	CHECK_EQ(fake_applies, 1);
+	CHECK(memcmp(&fake_s, &before, sizeof before) == 0);
+
+	/* a Set in two chunks */
+	const char *a = "{\"channel\":12,\"velocity";
+	const char *b = "Mode\":\"fixed\"}";
+	pe_send_from(PE_ME, 0x36, 7, "{\"resource\":\"X-PlayOptions\"}", 2, 1, a, (uint16_t)strlen(a));
+	host_in_pe();
+	CHECK_EQ(pe_count, 0);
+	pe_send_from(PE_ME, 0x36, 7, "", 2, 2, b, (uint16_t)strlen(b));
+	host_in_pe();
+	pe_reply(0x37, 7, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	CHECK_EQ(fake_s.channel, 11);
+	CHECK_EQ(fake_s.velocity_mode, VEL_FIXED);
+
+	/* a body over 256 bytes: 413, nothing applied */
+	static char big[160];
+	memset(big, ' ', sizeof big);
+	big[0] = '{';
+	pe_send_from(PE_ME, 0x36, 8, "{\"resource\":\"X-PlayOptions\"}", 2, 1, big, sizeof big);
+	big[sizeof big - 1] = '}';
+	pe_send_from(PE_ME, 0x36, 8, "", 2, 2, big + 1, sizeof big - 1);
+	host_in_pe();
+	pe_reply(0x37, 8, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":413}") == 0);
+
+	/* a chunk out of order */
+	pe_send_from(PE_ME, 0x36, 9, "", 2, 2, b, (uint16_t)strlen(b));
+	host_in_pe();
+	pe_reply(0x37, 9, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+	CHECK_EQ(fake_applies, 2);
+
+	midici_pe_bind(0, 0);
+}
+
+static unsigned pe_subscribe(const uint8_t from[4], uint8_t req, const char *resource)
+{
+	static char hdr[64], body[8], start[64];
+	unsigned id = 0;
+	snprintf(start, sizeof start, "{\"command\":\"start\",\"resource\":\"%s\"}", resource);
+	pe_send_from(from, 0x38, req, start, 1, 1, "", 0);
+	host_in_pe();
+	pe_reply(0x39, req, from, 320, hdr, body, sizeof body);
+	CHECK(sscanf(hdr, "{\"status\":200,\"subscribeId\":\"lp%u\"}", &id) == 1);
+	return id;
+}
+
+/* the one full notify of res to `to`, or none */
+static void pe_expect_notify(const uint8_t to[4], unsigned id, uint8_t res)
+{
+	static char hdr[64], body[512], want[512], expect[64];
+	host_in_pe();
+	if (!to) {
+		CHECK_EQ(pe_count, 0);
+		return;
+	}
+	struct pe_view v;
+	CHECK(pe_count >= 1);
+	pe_view(&pe_rx[0], &v);
+	uint16_t n = pe_reply(0x38, v.req, to, 320, hdr, body, sizeof body);
+	snprintf(expect, sizeof expect, "{\"command\":\"full\",\"subscribeId\":\"lp%u\"}", id);
+	CHECK(strcmp(hdr, expect) == 0);
+	CHECK_EQ(n, pe_render(res, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, n);
+}
+
+static void test_ci_pe_subscribe(void)
+{
+	static char hdr[64], body[8];
+	unsigned id;
+
+	pe_setup(4096, 1);
+	id = pe_subscribe(PE_ME, 1, "X-PlayOptions");
+	CHECK(id != 0);
+	pe_expect_notify(0, 0, 0);
+
+	/* a change on the device (the menu) notifies the subscriber */
+	fake_s.channel = 3;
+	pe_expect_notify(PE_ME, id, CI_PE_PLAY_OPTIONS);
+	/* a Scale change does not touch PlayOptions */
+	fake_s.root = 7;
+	pe_expect_notify(0, 0, 0);
+
+	/* the subscriber's own Set gets its reply and no notify */
+	pe_send(0x36, 2, "{\"resource\":\"X-PlayOptions\"}", "{\"dinMirror\":true}");
+	host_in_pe();
+	CHECK_EQ(pe_count, 1);
+	CHECK_EQ(pe_rx[0].buf[4], 0x37);
+
+	/* a Set from another initiator does notify it */
+	pe_send_from(PE_OTHER, 0x36, 3, "{\"resource\":\"X-PlayOptions\"}", 1, 1, "{\"dinMirror\":false}", 19);
+	host_in_pe();
+	CHECK(pe_count >= 2);
+	CHECK_EQ(pe_rx[0].buf[4], 0x37);
+	CHECK_MEM(pe_rx[0].buf + 10, PE_OTHER, 4);
+	CHECK_EQ(pe_rx[1].buf[4], 0x38);
+	CHECK_MEM(pe_rx[1].buf + 10, PE_ME, 4);
+
+	/* end by subscribeId */
+	snprintf(hdr, sizeof hdr, "{\"command\":\"end\",\"subscribeId\":\"lp%u\"}", id);
+	pe_send(0x38, 4, hdr, "");
+	host_in_pe();
+	pe_reply(0x39, 4, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	fake_s.channel = 4;
+	pe_expect_notify(0, 0, 0);
+
+	/* the latest subscriber wins */
+	pe_subscribe(PE_ME, 5, "X-ScaleSettings");
+	id = pe_subscribe(PE_OTHER, 6, "X-ScaleSettings");
+	fake_s.octave = 6;
+	pe_expect_notify(PE_OTHER, id, CI_PE_SCALE_SETTINGS);
+
+	/* a read-only resource or unknown command */
+	pe_send(0x38, 7, "{\"command\":\"start\",\"resource\":\"DeviceInfo\"}", "");
+	host_in_pe();
+	pe_reply(0x39, 7, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":405}") == 0);
+	pe_send(0x38, 8, "{\"command\":\"full\",\"subscribeId\":\"lp1\"}", "");
+	host_in_pe();
+	pe_reply(0x39, 8, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":400}") == 0);
+
+	/* invalidating the subscriber's MUID drops its subscription */
+	{
+		uint8_t invalidate[] = {0xF0, 0x7E, 0x7F, 0x0D, 0x7E, 2, 1, 2, 3, 4,
+			0x7F, 0x7F, 0x7F, 0x7F, 5, 6, 7, 8, 0xF7};
+		host_out_sysex(0, invalidate, sizeof invalidate);
+	}
+	fake_s.octave = 1;
+	pe_expect_notify(0, 0, 0);
+
+	/* a USB reset drops every subscription */
+	id = pe_subscribe(PE_ME, 9, "X-ScaleSettings");
+	enter_alt1();
+	{
+		struct ump_sysex7_rx reply;
+		host_out_sysex(0, ci_discovery, sizeof ci_discovery);
+		host_in_ci(&reply, 0);
+		memcpy(pe_muid, reply.buf + 6, 4);
+	}
+	fake_s.octave = 3;
+	pe_expect_notify(0, 0, 0);
+
+	midici_pe_bind(0, 0);
 }
 
 /* ---- EP1 OUT / RX ---- */
@@ -903,6 +1353,10 @@ void test_usb_data_all(void)
 	RUN(test_ci_nak_address_and_sysex_limit);
 	RUN(test_ci_muid_replacement_and_collision);
 	RUN(test_ci_reply_retries_and_is_discarded_on_alt_change);
+	RUN(test_ci_pe_capabilities_and_get);
+	RUN(test_ci_pe_small_initiator_and_terminate);
+	RUN(test_ci_pe_set);
+	RUN(test_ci_pe_subscribe);
 	RUN(test_ep1_out_odd_length);
 	RUN(test_ep1_out_leaves_nak_until_poll);
 	RUN(test_backpressure_nak_until_space);

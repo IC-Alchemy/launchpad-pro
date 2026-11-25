@@ -1,0 +1,329 @@
+/*
+ * MIDI-CI Property Exchange resources. See ci_pe.h and section 8 of
+ * docs/superpowers/specs/2026-11-21-midi2-scale-instrument-design.md.
+ */
+#include "midici/ci_pe.h"
+#include "midici/ci_identity.h"
+#include "scales/scales.h"
+
+/* The schemas below hard-code the ranges: keep them in step. */
+typedef char ci_pe_scale_count_is_25[(SCALE_COUNT == 25) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
+
+static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
+	"ResourceList", "DeviceInfo", "ChannelList", "X-ScaleSettings", "X-PlayOptions", "X-ScaleList",
+};
+
+/* Lives in flash. ResourceList does not list itself (Common Rules for PE).
+ * The schemas let a generic editor (MIDI 2.0 Workbench) show real controls. */
+static const char RESOURCE_LIST[] =
+	"[{\"resource\":\"DeviceInfo\"},"
+	"{\"resource\":\"ChannelList\"},"
+	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"\"schema\":{\"title\":\"Scale\",\"type\":\"object\",\"properties\":{"
+	"\"root\":{\"title\":\"Root (0 = C)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":11},"
+	"\"scale\":{\"title\":\"Scale (X-ScaleList index)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":24},"
+	"\"octave\":{\"title\":\"Octave\",\"type\":\"integer\",\"minimum\":0,\"maximum\":7},"
+	"\"layout\":{\"title\":\"Layout\",\"type\":\"string\",\"enum\":[\"inKey4ths\",\"inKey3rds\","
+	"\"inKeySequential\",\"chromatic4ths\",\"chromaticGuitar\"]},"
+	"\"absoluteRoot\":{\"title\":\"Absolute root\",\"type\":\"boolean\"}}}},"
+	"{\"resource\":\"X-PlayOptions\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"\"schema\":{\"title\":\"Play options\",\"type\":\"object\",\"properties\":{"
+	"\"velocityMode\":{\"title\":\"Velocity mode\",\"type\":\"string\","
+	"\"enum\":[\"peakWindow\",\"zeroLatency\",\"twoStage\",\"fixed\"]},"
+	"\"velocityCurve\":{\"title\":\"Velocity curve\",\"type\":\"string\",\"enum\":[\"soft\",\"linear\",\"hard\"]},"
+	"\"pressureMode\":{\"title\":\"Pressure\",\"type\":\"string\",\"enum\":[\"poly\",\"channel\",\"off\"]},"
+	"\"pressureThreshold\":{\"title\":\"Pressure threshold\",\"type\":\"string\",\"enum\":[\"low\",\"med\",\"high\"]},"
+	"\"pressureSmoothing\":{\"title\":\"Pressure smoothing\",\"type\":\"string\","
+	"\"enum\":[\"none\",\"light\",\"medium\",\"heavy\"]},"
+	"\"dinMirror\":{\"title\":\"Mirror pads to DIN\",\"type\":\"boolean\"},"
+	"\"channel\":{\"title\":\"MIDI channel\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}},"
+	"{\"resource\":\"X-ScaleList\",\"schema\":{\"title\":\"Scale names\",\"type\":\"array\","
+	"\"items\":{\"type\":\"string\"}}}]";
+
+/* Strings for the enum fields, indexed by the settings value. */
+static const char *const LAYOUTS[LAYOUT_COUNT] = {
+	"inKey4ths", "inKey3rds", "inKeySequential", "chromatic4ths", "chromaticGuitar",
+};
+static const char *const VEL_MODES[4] = {"peakWindow", "zeroLatency", "fixed", "twoStage"};
+static const char *const CURVES[3] = {"soft", "linear", "hard"};
+static const char *const PRESSURES[3] = {"poly", "channel", "off"};
+static const char *const THRESHOLDS[3] = {"low", "med", "high"};
+static const char *const SMOOTHINGS[4] = {"none", "light", "medium", "heavy"};
+
+uint8_t ci_pe_lookup(const char *name, uint16_t len)
+{
+	uint8_t r;
+	uint16_t i;
+
+	for (r = 0; r < CI_PE_RESOURCE_COUNT; r++) {
+		const char *n = NAMES[r];
+		for (i = 0; i < len && n[i] == name[i]; i++)
+			;
+		if (i == len && n[i] == 0)
+			return r;
+	}
+	return CI_PE_NONE;
+}
+
+const char *ci_pe_name(uint8_t res)
+{
+	return res < CI_PE_RESOURCE_COUNT ? NAMES[res] : "";
+}
+
+uint8_t ci_pe_can_set(uint8_t res)
+{
+	return res == CI_PE_SCALE_SETTINGS || res == CI_PE_PLAY_OPTIONS;
+}
+
+uint8_t ci_pe_can_subscribe(uint8_t res)
+{
+	return ci_pe_can_set(res);
+}
+
+/* ---- rendering ---- */
+
+static void member_int(struct ci_json_out *o, const char *key, int32_t v, uint8_t comma)
+{
+	if (comma)
+		ci_json_raw(o, ",");
+	ci_json_key(o, key);
+	ci_json_int(o, v);
+}
+
+static void member_str(struct ci_json_out *o, const char *key, const char *v, uint8_t comma)
+{
+	if (comma)
+		ci_json_raw(o, ",");
+	ci_json_key(o, key);
+	ci_json_str(o, v);
+}
+
+static void member_bool(struct ci_json_out *o, const char *key, uint8_t v)
+{
+	ci_json_raw(o, ",");
+	ci_json_key(o, key);
+	ci_json_bool(o, v);
+}
+
+static void id_array(struct ci_json_out *o, const char *key, const uint8_t *b, uint8_t n)
+{
+	uint8_t i;
+	ci_json_raw(o, ",");
+	ci_json_key(o, key);
+	ci_json_raw(o, "[");
+	for (i = 0; i < n; i++) {
+		if (i)
+			ci_json_raw(o, ",");
+		ci_json_int(o, b[i]);
+	}
+	ci_json_raw(o, "]");
+}
+
+static void device_info(struct ci_json_out *o, const char *piid)
+{
+	static const uint8_t man[3] = {CI_MANUFACTURER_0, CI_MANUFACTURER_1, CI_MANUFACTURER_2};
+	static const uint8_t fam[2] = {CI_FAMILY & 0x7F, (CI_FAMILY >> 7) & 0x7F};
+	static const uint8_t mod[2] = {CI_MODEL & 0x7F, (CI_MODEL >> 7) & 0x7F};
+	static const uint8_t ver[4] = {CI_SW_REV_0, CI_SW_REV_1, CI_SW_REV_2, CI_SW_REV_3};
+	uint8_t i;
+
+	ci_json_raw(o, "{");
+	/* the first member has no leading comma: write it by hand */
+	ci_json_key(o, "manufacturerId");
+	ci_json_raw(o, "[");
+	for (i = 0; i < 3; i++) {
+		if (i)
+			ci_json_raw(o, ",");
+		ci_json_int(o, man[i]);
+	}
+	ci_json_raw(o, "]");
+	member_str(o, "manufacturer", CI_MANUFACTURER_NAME, 1);
+	id_array(o, "familyId", fam, 2);
+	member_str(o, "family", CI_FAMILY_NAME, 1);
+	id_array(o, "modelId", mod, 2);
+	member_str(o, "model", CI_ENDPOINT_NAME, 1);
+	id_array(o, "versionId", ver, 4);
+	ci_json_raw(o, ",");
+	ci_json_key(o, "version");
+	ci_json_raw(o, "\"");
+	for (i = 0; i < 4; i++) {
+		if (i)
+			ci_json_raw(o, ".");
+		ci_json_int(o, ver[i]);
+	}
+	ci_json_raw(o, "\"");
+	if (piid && piid[0])
+		member_str(o, "serialNumber", piid, 1);
+	ci_json_raw(o, "}");
+}
+
+static void render_settings(uint8_t res, const struct settings *s, struct ci_json_out *o)
+{
+	ci_json_raw(o, "{");
+	if (res == CI_PE_SCALE_SETTINGS) {
+		member_int(o, "root", s->root, 0);
+		member_int(o, "scale", s->scale, 1);
+		member_int(o, "octave", s->octave, 1);
+		member_str(o, "layout", s->layout < LAYOUT_COUNT ? LAYOUTS[s->layout] : "", 1);
+		member_bool(o, "absoluteRoot", s->absolute_root);
+	} else {
+		member_str(o, "velocityMode", s->velocity_mode < 4 ? VEL_MODES[s->velocity_mode] : "", 0);
+		member_str(o, "velocityCurve", s->velocity_curve < 3 ? CURVES[s->velocity_curve] : "", 1);
+		member_str(o, "pressureMode", s->pressure_mode < 3 ? PRESSURES[s->pressure_mode] : "", 1);
+		member_str(o, "pressureThreshold",
+		           s->pressure_threshold < 3 ? THRESHOLDS[s->pressure_threshold] : "", 1);
+		member_str(o, "pressureSmoothing",
+		           s->pressure_smoothing < 4 ? SMOOTHINGS[s->pressure_smoothing] : "", 1);
+		member_bool(o, "dinMirror", s->din_mirror);
+		member_int(o, "channel", s->channel + 1, 1);
+	}
+	ci_json_raw(o, "}");
+}
+
+void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struct ci_json_out *o)
+{
+	uint8_t i;
+
+	switch (res) {
+	case CI_PE_RESOURCE_LIST:
+		ci_json_rawn(o, RESOURCE_LIST, (uint16_t)(sizeof RESOURCE_LIST - 1));
+		break;
+	case CI_PE_DEVICE_INFO:
+		device_info(o, piid);
+		break;
+	case CI_PE_CHANNEL_LIST:
+		ci_json_raw(o, "[{");
+		member_str(o, "title", "Standalone Port", 0);
+		member_int(o, "channel", s->channel + 1, 1);
+		ci_json_raw(o, "}]");
+		break;
+	case CI_PE_SCALE_SETTINGS:
+	case CI_PE_PLAY_OPTIONS:
+		render_settings(res, s, o);
+		break;
+	case CI_PE_SCALE_LIST:
+		ci_json_raw(o, "[");
+		for (i = 0; i < SCALE_COUNT; i++) {
+			if (i)
+				ci_json_raw(o, ",");
+			ci_json_str(o, SCALES[i].name);
+		}
+		ci_json_raw(o, "]");
+		break;
+	default:
+		break;
+	}
+}
+
+uint16_t ci_pe_body_len(uint8_t res, const struct settings *s, const char *piid)
+{
+	struct ci_json_out o;
+	ci_json_out_init(&o, 0, 0, 0);
+	ci_pe_render(res, s, piid, &o);
+	return o.pos;
+}
+
+/* ---- Set ---- */
+
+/* index of the member's string in table[n], or -1 */
+static int16_t enum_index(const struct ci_json_member *m, const char *const *table, uint8_t n)
+{
+	uint8_t i;
+	if (m->type != CI_JSON_STR)
+		return -1;
+	for (i = 0; i < n; i++)
+		if (ci_json_str_is(m, table[i]))
+			return i;
+	return -1;
+}
+
+static uint8_t set_int(const struct ci_json_member *m, int32_t lo, int32_t hi, int32_t bias, uint8_t *field)
+{
+	if (m->type != CI_JSON_INT || m->num < lo || m->num > hi)
+		return 0;
+	*field = (uint8_t)(m->num + bias);
+	return 1;
+}
+
+static uint8_t set_bool(const struct ci_json_member *m, uint8_t *field)
+{
+	if (m->type != CI_JSON_BOOL)
+		return 0;
+	*field = (uint8_t)m->num;
+	return 1;
+}
+
+static uint8_t set_enum(const struct ci_json_member *m, const char *const *table, uint8_t n, uint8_t *field)
+{
+	int16_t i = enum_index(m, table, n);
+	if (i < 0)
+		return 0;
+	*field = (uint8_t)i;
+	return 1;
+}
+
+uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s)
+{
+	struct settings t = *s;
+	struct ci_json_it it;
+	struct ci_json_member m;
+	int r;
+
+	if (!ci_pe_can_set(res))
+		return res < CI_PE_RESOURCE_COUNT ? CI_PE_STATUS_NOT_ALLOWED : CI_PE_STATUS_NOT_FOUND;
+	ci_json_it_init(&it, body, len);
+	while ((r = ci_json_next(&it, &m)) == 1) {
+		uint8_t ok = 1;
+		if (res == CI_PE_SCALE_SETTINGS) {
+			if (ci_json_key_is(&m, "root"))
+				ok = set_int(&m, 0, 11, 0, &t.root);
+			else if (ci_json_key_is(&m, "scale"))
+				ok = set_int(&m, 0, SCALE_COUNT - 1, 0, &t.scale);
+			else if (ci_json_key_is(&m, "octave"))
+				ok = set_int(&m, 0, 7, 0, &t.octave);
+			else if (ci_json_key_is(&m, "layout"))
+				ok = set_enum(&m, LAYOUTS, LAYOUT_COUNT, &t.layout);
+			else if (ci_json_key_is(&m, "absoluteRoot"))
+				ok = set_bool(&m, &t.absolute_root);
+		} else {
+			if (ci_json_key_is(&m, "velocityMode"))
+				ok = set_enum(&m, VEL_MODES, 4, &t.velocity_mode);
+			else if (ci_json_key_is(&m, "velocityCurve"))
+				ok = set_enum(&m, CURVES, 3, &t.velocity_curve);
+			else if (ci_json_key_is(&m, "pressureMode"))
+				ok = set_enum(&m, PRESSURES, 3, &t.pressure_mode);
+			else if (ci_json_key_is(&m, "pressureThreshold"))
+				ok = set_enum(&m, THRESHOLDS, 3, &t.pressure_threshold);
+			else if (ci_json_key_is(&m, "pressureSmoothing"))
+				ok = set_enum(&m, SMOOTHINGS, 4, &t.pressure_smoothing);
+			else if (ci_json_key_is(&m, "dinMirror"))
+				ok = set_bool(&m, &t.din_mirror);
+			else if (ci_json_key_is(&m, "channel"))
+				ok = set_int(&m, 1, 16, -1, &t.channel);
+		}
+		if (!ok)
+			return CI_PE_STATUS_BAD_REQUEST;
+	}
+	if (r < 0 || !settings_valid(&t))
+		return CI_PE_STATUS_BAD_REQUEST;
+	*s = t;
+	return CI_PE_STATUS_OK;
+}
+
+uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
+{
+	uint8_t bits = 0;
+
+	if (a->root != b->root || a->scale != b->scale || a->octave != b->octave ||
+	    a->layout != b->layout || a->absolute_root != b->absolute_root)
+		bits |= CI_PE_BIT(CI_PE_SCALE_SETTINGS);
+	if (a->velocity_mode != b->velocity_mode || a->velocity_curve != b->velocity_curve ||
+	    a->pressure_mode != b->pressure_mode || a->pressure_threshold != b->pressure_threshold ||
+	    a->pressure_smoothing != b->pressure_smoothing || a->din_mirror != b->din_mirror ||
+	    a->channel != b->channel)
+		bits |= CI_PE_BIT(CI_PE_PLAY_OPTIONS);
+	if (a->channel != b->channel)
+		bits |= CI_PE_BIT(CI_PE_CHANNEL_LIST);
+	return bits;
+}
