@@ -10,6 +10,11 @@ void io_note_on(uint8_t port, uint8_t ch, uint8_t note, uint16_t vel)
 	hal_send_note_on2(port, ch, note, vel);
 }
 
+void io_note_on_pitch(uint8_t port, uint8_t ch, uint8_t note, uint16_t vel, uint16_t pitch79)
+{
+	hal_send_note_on2_pitch(port, ch, note, vel, pitch79);
+}
+
 void io_note_off(uint8_t port, uint8_t ch, uint8_t note)
 {
 	hal_send_note_off2(port, ch, note, 0);

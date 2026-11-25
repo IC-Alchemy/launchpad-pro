@@ -23,7 +23,7 @@ OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_S
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
 SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
-	src/scales/scales.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c src/pads/twostage.c
+	src/scales/scales.c src/scales/tuning.c src/scales/tuning_data.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c src/pads/twostage.c
 
 ifeq ($(OS),Windows_NT)
   EXE = .exe
@@ -59,7 +59,7 @@ TEST_SOURCES += tests/test_usb_desc.c src/usb/usb_desc.c
 TEST_SOURCES += tests/test_usb_prop.c src/usb/usb_prop.c src/usb/usb_midi2.c src/usb/usb_endp.c
 TEST_SOURCES += tests/test_usb_data.c
 TEST_SOURCES += tests/test_pad_velocity.c src/pads/pad_velocity.c
-TEST_SOURCES += tests/test_scales.c src/scales/scales.c
+TEST_SOURCES += tests/test_scales.c tests/test_tuning.c src/scales/scales.c src/scales/tuning.c src/scales/tuning_data.c
 TEST_SOURCES += tests/test_settings.c src/instrument/settings.c tests/stubs/io_stub.c
 TEST_SOURCES += tests/test_pad_engine.c src/pads/pad_engine.c
 TEST_SOURCES += tests/test_pressure.c

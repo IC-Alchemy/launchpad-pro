@@ -18,19 +18,27 @@ struct settings {
 	uint8_t root, scale, octave, layout, absolute_root,
 	        velocity_mode, velocity_curve, pressure_mode,
 	        pressure_threshold, din_mirror, channel, pressure_smoothing;
+	uint8_t tuning;      /* tuning id (scales/tuning.h); offers scale */
+	uint16_t a4_tenths;  /* reference pitch in 0.1 Hz, A4_TENTHS_MIN..MAX */
 };
 
-/* Record: 'LPM2', version, 12 fields, checksum. Version 1 had 11 fields (17
- * bytes, no smoothing); settings_load still accepts it. */
-#define SETTINGS_RECORD_LEN 18
+/* Record: 'LPM2', version, 12 one-byte fields, tuning, A4 (low byte first),
+ * checksum. Version 2 (18 bytes) had no tuning or A4, version 1 (17 bytes)
+ * no smoothing either; settings_load still accepts both. */
+#define SETTINGS_RECORD_LEN 21
+#define SETTINGS_RECORD_V2_LEN 18
 #define SETTINGS_RECORD_V1_LEN 17
 #define SETTINGS_SAVE_QUIET_MS 2000
 
 void settings_defaults(struct settings *s);
+/* The scale a change to this tuning keeps: the current one if the tuning
+ * offers it, else the tuning's default. */
+uint8_t settings_scale_for(uint8_t tuning, uint8_t scale);
 uint8_t settings_valid(const struct settings *s);
 void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN]);
-/* 1 ok; 0 leaves *s untouched. Version 1 records (first 17 bytes) decode with
- * the default smoothing; the 18th byte is then ignored. */
+/* 1 ok; 0 leaves *s untouched. Older records decode with the defaults for
+ * the fields they lack (12-EDO at 440 Hz, light smoothing); the bytes past
+ * their length are ignored. */
 uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *s);
 /* flash offset 0; defaults on failure; remembers the result as "saved" */
 void settings_load(struct settings *s);

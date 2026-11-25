@@ -101,14 +101,22 @@ static void test_scale_table_sane(void)
 	int i, j;
 	for (i = 0; i < SCALE_COUNT; i++) {
 		const struct scale_def *s = &SCALES[i];
-		CHECK(s->n >= 5 && s->n <= 8);
+		/* twelve-note scales first, then All Degrees, then tuned ones */
+		CHECK_EQ(s->degrees == 0, i <= SCALE_ALL_DEGREES);
+		if (i == SCALE_ALL_DEGREES) {
+			CHECK_EQ(s->n, 0);
+			continue;
+		}
+		CHECK(s->n >= 5 && s->n <= 12);
 		CHECK_EQ(s->steps[0], 0);
 		for (j = 1; j < s->n; j++)
 			CHECK(s->steps[j] > s->steps[j - 1]);
-		CHECK(s->steps[s->n - 1] < 12);
+		CHECK(s->steps[s->n - 1] < (s->degrees ? s->degrees : 12));
 	}
 	CHECK(strcmp(SCALES[0].name, "Major") == 0);
 	CHECK(strcmp(SCALES[24].name, "Spanish") == 0);
+	CHECK(strcmp(SCALES[SCALE_CHROMATIC].name, "Chromatic") == 0);
+	CHECK(strcmp(SCALES[SCALE_ALL_DEGREES].name, "All Degrees") == 0);
 }
 
 void test_scales_all(void)

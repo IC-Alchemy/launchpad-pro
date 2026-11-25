@@ -17,6 +17,7 @@ void test_usb_prop_all(void);
 void test_usb_data_all(void);
 void test_pad_velocity_all(void);
 void test_scales_all(void);
+void test_tuning_all(void);
 void test_settings_all(void);
 void test_pad_engine_all(void);
 void test_pressure_all(void);
@@ -38,6 +39,7 @@ int main(void)
 	test_usb_data_all();
 	test_pad_velocity_all();
 	test_scales_all();
+	test_tuning_all();
 	test_settings_all();
 	test_pad_engine_all();
 	test_pressure_all();

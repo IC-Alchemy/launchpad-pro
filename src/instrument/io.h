@@ -8,6 +8,8 @@
  * device and by tests/stubs/io_stub.c on the host. */
 
 void io_note_on(uint8_t port, uint8_t ch, uint8_t note, uint16_t vel);
+/* A Note On carrying its pitch (Pitch 7.9: semitones * 512) on MIDI 2.0 */
+void io_note_on_pitch(uint8_t port, uint8_t ch, uint8_t note, uint16_t vel, uint16_t pitch79);
 void io_note_off(uint8_t port, uint8_t ch, uint8_t note);
 void io_poly_pressure(uint8_t port, uint8_t ch, uint8_t note, uint32_t v);
 void io_channel_pressure(uint8_t port, uint8_t ch, uint32_t v);

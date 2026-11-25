@@ -938,6 +938,28 @@ static void test_note_on2_paths(void)
 	CHECK_EQ(ump_tx_reserve_words(), 4);			/* two accepted attacks */
 }
 
+static void test_note_on2_pitch_paths(void)
+{
+	stubs_reset(); usb_midi2_usb_reset();                 /* alt 0: plain 7-bit note */
+	hal_send_note_on2_pitch(USBSTANDALONE, 0, 64, 0x8000, 0x7C00);
+	CHECK_EQ(stub.real_midi_calls, 1);
+	CHECK_EQ(stub.real_midi_last[1], 0x90);
+	CHECK_EQ(stub.real_midi_last[2], 64);
+	CHECK_EQ(stub.real_midi_last[3], 0x40);
+	enter_alt1(); hal_send_note_on2_pitch(USBSTANDALONE, 2, 64, 0xABCD, 0x7C01); __wrap_usbmidi_poll();
+	CHECK_EQ(stub.last_tx_len, 8);
+	CHECK_EQ(stub.last_tx[0], 3);                         /* attribute: Pitch 7.9 */
+	CHECK_EQ(stub.last_tx[1], 64);
+	CHECK_EQ(stub.last_tx[2], 0x92);
+	CHECK_EQ(stub.last_tx[4], 0x01); CHECK_EQ(stub.last_tx[5], 0x7C);
+	CHECK_EQ(stub.last_tx[6], 0xCD); CHECK_EQ(stub.last_tx[7], 0xAB);
+	stub.ep_tx_status[1] = EP_TX_NAK;
+	hal_send_note_on2_pitch(DINMIDI, 3, 61, 0xFFFF, 0x7C00);  /* DIN: plain */
+	CHECK_EQ(stub.real_midi_last[0], DINMIDI);
+	CHECK_EQ(stub.real_midi_last[1], 0x93);
+	CHECK_EQ(stub.real_midi_last[2], 61);
+}
+
 static void test_note_off2_and_reserve(void)
 {
 	uint32_t w[16];
@@ -1369,6 +1391,7 @@ void test_usb_data_all(void)
 	RUN(test_alt1_entry_runs_service_first);
 	RUN(test_usbmidi_poll_tx_conditions);
 	RUN(test_note_on2_paths);
+	RUN(test_note_on2_pitch_paths);
 	RUN(test_note_off2_and_reserve);
 	RUN(test_saturated_note_offs_always_queue);
 	RUN(test_hal_send_midi_alt1);

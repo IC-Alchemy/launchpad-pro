@@ -86,6 +86,50 @@ static void test_initial_draw_clears_unused_leds(void)
 	CHECK(led_is(11, 0, 20, 63));
 }
 
+static void test_tuned_notes_carry_their_pitch(void)
+{
+	struct settings s;
+
+	setup();
+	zero_latency(T0);
+	/* 12-EDO at 440: the note number says it all */
+	ui_pad(11, 100, T0 + 10);
+	ui_pad(11, 0, T0 + 20);
+	CHECK_EQ(io_log[0].note, 60);
+	CHECK_EQ(io_log[0].has_pitch, 0);
+
+	/* 24-EDO Rast: a quarter-tone a note, the pitch rides on the Note On;
+	 * DIN gets the plain note */
+	s = *ui_settings();
+	s.tuning = 1;
+	s.scale = 32;
+	s.din_mirror = 1;
+	ui_apply_settings(&s, T0 + 30);
+	io_n = 0;
+	ui_pad(12, 100, T0 + 40);
+	CHECK_EQ(io_n, 2);
+	CHECK_EQ(io_log[0].port, USBSTANDALONE);
+	CHECK_EQ(io_log[0].note, 64);
+	CHECK_EQ(io_log[0].has_pitch, 1);
+	CHECK_EQ(io_log[0].pitch, 62 * 512);
+	CHECK_EQ(io_log[1].port, DINMIDI);
+	CHECK_EQ(io_log[1].note, 64);
+	CHECK_EQ(io_log[1].has_pitch, 0);
+	ui_pad(12, 0, T0 + 50);
+
+	/* 12-EDO at 432 Hz: same notes, lower pitch */
+	s.tuning = 0;
+	s.scale = 0;
+	s.din_mirror = 0;
+	s.a4_tenths = 4320;
+	ui_apply_settings(&s, T0 + 60);
+	io_n = 0;
+	ui_pad(11, 100, T0 + 70);
+	CHECK_EQ(io_log[0].note, 60);
+	CHECK_EQ(io_log[0].has_pitch, 1);
+	CHECK_EQ(io_log[0].pitch, (60 * 32768 - 10409 + 32) >> 6);
+}
+
 static void test_press_plays_mapped_note(void)
 {
 	setup();
@@ -214,6 +258,7 @@ static void test_menu_drawing(void)
 	setup_tap(T0);
 	CHECK(led_is(95, 63, 63, 63));
 	CHECK(led_is(96, 6, 6, 6));
+	CHECK(led_is(97, 6, 6, 6));
 	CHECK(led_is(91, 0, 0, 0));
 	CHECK(led_is(94, 0, 0, 0));
 	CHECK(led_is(61, 0, 63, 0));   /* root C selected */
@@ -224,11 +269,78 @@ static void test_menu_drawing(void)
 	CHECK(led_is(51, 8, 0, 0));
 	CHECK(led_is(41, 0, 0, 63));   /* Major */
 	CHECK(led_is(11, 0, 0, 8));    /* scale 24 */
-	CHECK(led_is(12, 0, 0, 0));
+	CHECK(led_is(17, 0, 0, 8));    /* scale 30, Chromatic */
+	CHECK(led_is(18, 0, 0, 0));
 	CHECK(led_is(86, 63, 24, 0));  /* In-key 4ths */
 	CHECK(led_is(83, 8, 3, 0));
 	CHECK(led_is(81, 8, 3, 0));    /* absolute root off */
 	CHECK(led_is(82, 0, 0, 0));
+}
+
+static void test_tuning_page(void)
+{
+	setup();
+	setup_tap(T0);
+	tap(97, T0 + 10);
+	CHECK(led_is(97, 63, 63, 63));
+	CHECK(led_is(95, 6, 6, 6));
+	CHECK(led_is(81, 0, 48, 63));  /* 12-EDO selected */
+	CHECK(led_is(82, 0, 6, 8));    /* 24-EDO */
+	CHECK(led_is(75, 8, 7, 0));    /* Just Intonation */
+	CHECK(led_is(67, 8, 0, 6));    /* 22 Shruti */
+	CHECK(led_is(55, 4, 0, 8));    /* Carlos Gamma, the 29th */
+	CHECK(led_is(56, 0, 0, 0));
+	CHECK(led_is(15, 63, 63, 63)); /* 440 */
+	CHECK(led_is(13, 6, 6, 6));
+	CHECK(led_is(21, 6, 6, 6));
+	CHECK(led_is(23, 0, 0, 0));
+	tap(33, T0 + 20);              /* nothing on this page */
+	CHECK_EQ(ui_settings()->scale, 0);
+
+	/* a tuning that doesn't offer the scale takes its default */
+	tap(82, T0 + 30);
+	CHECK_EQ(ui_settings()->tuning, 1);
+	CHECK_EQ(ui_settings()->scale, 32);
+	CHECK(led_is(82, 0, 48, 63));
+	CHECK(led_is(81, 0, 6, 8));
+
+	/* A4: steps clamp at the range, presets jump */
+	tap(28, T0 + 40);
+	CHECK_EQ(ui_settings()->a4_tenths, 4410);
+	CHECK(led_is(15, 6, 6, 6));
+	tap(21, T0 + 50);
+	tap(22, T0 + 60);
+	CHECK_EQ(ui_settings()->a4_tenths, 4399);
+	tap(27, T0 + 70);
+	CHECK_EQ(ui_settings()->a4_tenths, 4400);
+	CHECK(led_is(15, 63, 63, 63));
+	tap(13, T0 + 80);
+	CHECK_EQ(ui_settings()->a4_tenths, 4150);
+	tap(22, T0 + 90);
+	CHECK_EQ(ui_settings()->a4_tenths, 4150);
+	tap(16, T0 + 100);
+	CHECK_EQ(ui_settings()->a4_tenths, 4420);
+	tap(14, T0 + 110);
+	CHECK_EQ(ui_settings()->a4_tenths, 4320);
+
+	/* the Scale page offers the tuning's scales */
+	tap(95, T0 + 120);
+	CHECK(led_is(41, 0, 0, 63));   /* Maqam Rast */
+	CHECK(led_is(45, 0, 0, 8));    /* All Degrees */
+	CHECK(led_is(46, 0, 0, 0));
+	tap(42, T0 + 130);
+	CHECK_EQ(ui_settings()->scale, 33);
+	tap(46, T0 + 140);
+	CHECK_EQ(ui_settings()->scale, 33);
+
+	/* back to 12-EDO keeps a scale it offers, else Major */
+	tap(97, T0 + 150);
+	tap(81, T0 + 160);
+	CHECK_EQ(ui_settings()->tuning, 0);
+	CHECK_EQ(ui_settings()->scale, 0);
+	CHECK_EQ(io_n, 0);
+	ui_poll(T0 + 160 + SETTINGS_SAVE_QUIET_MS);
+	CHECK_EQ(io_flash_writes, 1);
 }
 
 static void test_scale_page_select(void)
@@ -258,7 +370,7 @@ static void test_scale_page_select(void)
 	CHECK_EQ(ui_settings()->scale, 24);
 	tap(67, T0 + 170);
 	CHECK_EQ(ui_settings()->root, 11);
-	tap(12, T0 + 180);             /* unused pad */
+	tap(18, T0 + 180);             /* unused pad */
 	CHECK_EQ(ui_settings()->scale, 24);
 	CHECK_EQ(io_n, 0);             /* pads don't reach the engine */
 	CHECK_EQ(ui_menu_open(), 1);
@@ -514,7 +626,7 @@ static void test_apply_settings_rejects_invalid(void)
 	setup();
 	s = *ui_settings();
 	memcpy(leds, io_leds, sizeof leds);
-	s.scale = 30;
+	s.scale = SCALE_ALL_DEGREES; /* 12-EDO doesn't offer it */
 	ui_apply_settings(&s, T0 + 10);
 	CHECK_EQ(ui_settings()->scale, 0);
 	CHECK_MEM(leds, io_leds, sizeof leds);
@@ -678,6 +790,8 @@ void test_ui_all(void)
 	RUN(test_menu_drawing);
 	RUN(test_velocity_row_columns);
 	RUN(test_scale_page_select);
+	RUN(test_tuning_page);
+	RUN(test_tuned_notes_carry_their_pitch);
 	RUN(test_options_page_select);
 	RUN(test_smoothing_row_columns);
 	RUN(test_options_section_hues);

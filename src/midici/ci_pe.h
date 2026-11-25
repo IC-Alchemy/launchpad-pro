@@ -21,6 +21,7 @@ enum ci_pe_resource {
 	CI_PE_SCALE_SETTINGS,	/* "X-ScaleSettings": Get / Set / Subscribe */
 	CI_PE_PLAY_OPTIONS,	/* "X-PlayOptions": Get / Set / Subscribe */
 	CI_PE_SCALE_LIST,	/* "X-ScaleList": the scale names, read-only */
+	CI_PE_TUNING_LIST,	/* "X-TuningList": tuning ids, names and scales, read-only */
 	CI_PE_RESOURCE_COUNT,
 	CI_PE_NONE = 0xFF
 };

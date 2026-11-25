@@ -3,6 +3,7 @@
 #include "instrument/io.h"
 #include "pads/pad_engine.h"
 #include "scales/scales.h"
+#include "scales/tuning.h"
 #include "app_defs.h"
 
 #include <string.h>
@@ -16,11 +17,13 @@
 #define BTN_ROOT_UP  94
 #define BTN_SCALE    95
 #define BTN_OPTIONS  96
+#define BTN_TUNING   97
 
-enum { PAGE_SCALE, PAGE_OPTIONS };
+enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING };
 
 /* menu item colour families, each dim (index 0) and bright (index 1) */
-enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING, K_KINDS };
+enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING,
+       K_EQUAL, K_JUST, K_TEMPERAMENT, K_INDIAN, K_XENO, K_A4, K_KINDS };
 
 static const uint8_t ITEM_RGB[K_KINDS][2][3] = {
 	{{0, 8, 0}, {0, 63, 0}},       /* root keys: green */
@@ -32,6 +35,13 @@ static const uint8_t ITEM_RGB[K_KINDS][2][3] = {
 	{{6, 5, 3}, {63, 48, 36}},     /* velocity: warm */
 	{{3, 5, 6}, {36, 52, 63}},     /* aftertouch: cool */
 	{{4, 6, 4}, {44, 63, 40}},     /* MIDI routing: soft green */
+	/* Tuning page: one hue per tuning family (enum tuning_family order) */
+	{{0, 6, 8}, {0, 48, 63}},      /* equal divisions: cyan */
+	{{8, 7, 0}, {63, 56, 0}},      /* just: yellow */
+	{{8, 3, 1}, {63, 20, 4}},      /* temperaments: orange */
+	{{8, 0, 6}, {63, 0, 44}},      /* Indian: magenta */
+	{{4, 0, 8}, {32, 0, 63}},      /* xenharmonic: violet */
+	{{6, 6, 6}, {63, 63, 63}},     /* A4: white */
 };
 
 static const uint8_t ROLE_RGB[5][3] = {
@@ -54,6 +64,12 @@ static const uint8_t LAYOUT_AT[5] = {
 	LAYOUT_CHROM_GUITAR, LAYOUT_INKEY_SEQ, LAYOUT_INKEY_3RDS,
 	LAYOUT_INKEY_4THS, LAYOUT_CHROM_4THS,
 };
+
+/* Tuning page: the library on rows 8..5 (library order, row 8 first); A4
+ * steps on row 2 (-1, -0.1, +0.1, +1 Hz on columns 1, 2, 7, 8) and the
+ * common reference pitches on row 1. */
+static const int8_t A4_STEP[8] = {-10, -1, 0, 0, 0, 0, 1, 10};
+static const uint16_t A4_PRESET[4] = {4150, 4320, 4400, 4420};
 
 static struct settings g_s;
 static uint8_t g_sounding[16];  /* bit per pitch: sounding on the engine */
@@ -88,6 +104,7 @@ static void ctx(struct scale_ctx *c)
 	c->octave = g_s.octave;
 	c->layout = g_s.layout;
 	c->absolute_root = g_s.absolute_root;
+	c->tuning = g_s.tuning;
 }
 
 static uint8_t is_sounding(int16_t pitch)
@@ -130,17 +147,27 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 			it->field = &g_s.octave;
 			it->value = c;
 			it->kind = K_OCTAVE;
-		} else if (r >= 2 && r <= 4) {
+		} else if (r >= 1 && r <= 4) {
+			/* the scales the tuning offers, in its order: rows 4..2,
+			 * then row 1 */
+			uint8_t sc = tuning_scale_at(tuning_get(g_s.tuning), (uint8_t)((4 - r) * 8 + c));
+
+			if (sc == 0xFF)
+				return 0;
 			it->field = &g_s.scale;
-			it->value = (uint8_t)((4 - r) * 8 + c);
-			it->kind = K_SCALE;
-		} else if (r == 1 && c == 0) {
-			it->field = &g_s.scale;
-			it->value = 24;
+			it->value = sc;
 			it->kind = K_SCALE;
 		} else {
 			return 0;
 		}
+	} else if (g_page == PAGE_TUNING) {
+		uint8_t at = (uint8_t)((8 - r) * 8 + c);
+
+		if (r < 5 || at >= TUNING_COUNT)
+			return 0;
+		it->field = &g_s.tuning;
+		it->value = TUNINGS[at].id;
+		it->kind = (uint8_t)(K_EQUAL + TUNINGS[at].family);
 	} else {
 		if (r == 8 && c < 4) {
 			/* menu order: Peak-window, Zero-latency, Two-stage, Fixed */
@@ -175,18 +202,47 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 	return 1;
 }
 
+static uint8_t page_of(uint8_t button)
+{
+	return button == BTN_OPTIONS ? PAGE_OPTIONS : button == BTN_TUNING ? PAGE_TUNING : PAGE_SCALE;
+}
+
+#define A4_NONE (-1)
+#define A4_STEP_PAD (-2)
+
+/* On the Tuning page: a reference-pitch preset (0..3), A4_STEP_PAD or
+ * A4_NONE. */
+static int8_t a4_pad(uint8_t i)
+{
+	uint8_t r = i / 10, c = i % 10 - 1;
+
+	if (g_page != PAGE_TUNING)
+		return A4_NONE;
+	if (r == 2 && A4_STEP[c])
+		return A4_STEP_PAD;
+	if (r == 1 && c >= 2 && c < 6)
+		return (int8_t)(c - 2);
+	return A4_NONE;
+}
+
 static const uint8_t *colour(uint8_t i)
 {
 	if (g_menu) {
 		struct item it;
 
 		if (is_grid(i)) {
+			int8_t a4 = a4_pad(i);
+
+			if (a4 >= 0)
+				return ITEM_RGB[K_A4][A4_PRESET[a4] == g_s.a4_tenths];
+			if (a4 == A4_STEP_PAD)
+				return ITEM_RGB[K_A4][0];
 			if (!menu_item(i, &it))
 				return RGB_OFF;
 			return ITEM_RGB[it.kind][it.toggle ? *it.field != 0 : *it.field == it.value];
 		}
-		if (i == BTN_SCALE || i == BTN_OPTIONS)
-			return (i == BTN_OPTIONS) == (g_page == PAGE_OPTIONS) ? RGB_WHITE : RGB_DIM_WHITE;
+		if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING)
+			return page_of(i) == g_page ? RGB_WHITE : RGB_DIM_WHITE;
 		return RGB_OFF;
 	}
 	if (is_grid(i)) {
@@ -260,9 +316,20 @@ static int16_t pad_target(uint8_t pad, uint8_t *ch, uint8_t *din)
 	return scale_pad_pitch(&c, pad);
 }
 
+/* the pad engine's intonation hook: a pitch attribute unless the world is
+ * 12-EDO at A4 = 440, where the note number says it all */
+static uint8_t note_pitch(uint8_t note, uint16_t *pitch79)
+{
+	if (tuning_is_standard(g_s.tuning, g_s.a4_tenths))
+		return 0;
+	*pitch79 = tuning_pitch79(g_s.tuning, g_s.root, g_s.a4_tenths, note);
+	return 1;
+}
+
 void ui_init(uint32_t now)
 {
 	pe_set_target(pad_target);
+	pe_set_pitch(note_pitch);
 	settings_load(&g_s);
 	configure();
 	memset(g_sounding, 0, sizeof g_sounding);
@@ -299,12 +366,26 @@ static void menu_pad(uint8_t i, uint32_t now)
 	struct item it;
 	uint8_t v;
 
-	if (i == BTN_SCALE || i == BTN_OPTIONS) {
-		g_page = i == BTN_OPTIONS ? PAGE_OPTIONS : PAGE_SCALE;
+	if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING) {
+		g_page = page_of(i);
 		draw_all();
 		return;
 	}
-	if (!is_grid(i) || !menu_item(i, &it))
+	if (!is_grid(i))
+		return;
+	if (a4_pad(i) != A4_NONE) {
+		int8_t p = a4_pad(i);
+		int32_t a4 = p >= 0 ? A4_PRESET[p] : g_s.a4_tenths + A4_STEP[i % 10 - 1];
+
+		a4 = a4 < A4_TENTHS_MIN ? A4_TENTHS_MIN : a4 > A4_TENTHS_MAX ? A4_TENTHS_MAX : a4;
+		if (a4 == g_s.a4_tenths)
+			return;
+		g_s.a4_tenths = (uint16_t)a4;
+		draw_all();
+		settings_touch(now);
+		return;
+	}
+	if (!menu_item(i, &it))
 		return;
 	v = it.toggle ? !*it.field : it.value;
 	if (v == *it.field)
@@ -312,6 +393,8 @@ static void menu_pad(uint8_t i, uint32_t now)
 	*it.field = v;
 	if (g_page == PAGE_OPTIONS)
 		configure();
+	if (g_page == PAGE_TUNING)
+		g_s.scale = settings_scale_for(g_s.tuning, g_s.scale);
 	draw_all();
 	settings_touch(now);
 }

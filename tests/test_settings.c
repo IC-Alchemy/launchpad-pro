@@ -1,5 +1,6 @@
 #include "test.h"
 #include "instrument/settings.h"
+#include "scales/scales.h"
 #include "stubs/io_stub.h"
 
 static int same(const struct settings *a, const struct settings *b)
@@ -24,6 +25,8 @@ static void test_defaults_valid(void)
 	CHECK_EQ(s.din_mirror, 0);
 	CHECK_EQ(s.channel, 0);
 	CHECK_EQ(s.pressure_smoothing, SMOOTH_LIGHT);
+	CHECK_EQ(s.tuning, 0);
+	CHECK_EQ(s.a4_tenths, 4400);
 }
 
 static void test_record_round_trip(void)
@@ -38,10 +41,14 @@ static void test_record_round_trip(void)
 	s.velocity_mode = VEL_TWO_STAGE; s.velocity_curve = CURVE_HARD;
 	s.pressure_mode = PRESS_OFF; s.pressure_threshold = THRESH_HIGH;
 	s.din_mirror = 1; s.channel = 15; s.pressure_smoothing = SMOOTH_HEAVY;
+	s.tuning = 96; s.scale = 27; s.a4_tenths = 4321;
 	settings_encode(&s, rec);
-	CHECK_EQ(SETTINGS_RECORD_LEN, 18);
-	CHECK_MEM(rec, "LPM2\x02", 5);
+	CHECK_EQ(SETTINGS_RECORD_LEN, 21);
+	CHECK_MEM(rec, "LPM2\x03", 5);
 	CHECK_EQ(rec[16], SMOOTH_HEAVY);
+	CHECK_EQ(rec[17], 96);
+	CHECK_EQ(rec[18], 4321 & 0xFF);
+	CHECK_EQ(rec[19], 4321 >> 8);
 	for (i = 0; i < SETTINGS_RECORD_LEN; i++) sum += rec[i];
 	CHECK_EQ(sum & 0xFF, 0);
 	settings_defaults(&d);
@@ -51,7 +58,7 @@ static void test_record_round_trip(void)
 
 	/* a failed decode leaves the target untouched */
 	rec[5] = 12;
-	rec[17] = (uint8_t)(rec[17] - 5);
+	rec[20] = (uint8_t)(rec[20] - 5);
 	back = d;
 	CHECK_EQ(settings_decode(rec, &back), 0);
 	CHECK(same(&back, &d));
@@ -110,6 +117,52 @@ static void test_v1_record_loads_with_default_smoothing(void)
 	memcpy(io_flash, v1, 17);
 	settings_load(&s);
 	CHECK(same(&s, &d));
+}
+
+static void test_v2_record_loads_twelve_edo(void)
+{
+	struct settings s;
+	uint8_t v2[18] = {'L', 'P', 'M', '2', 2, 7, 24, 2, 4, 1, 2, 1, 0, 1, 1, 9, 3, 0};
+	uint8_t sum = 0;
+	int i;
+
+	for (i = 0; i < 17; i++) sum = (uint8_t)(sum + v2[i]);
+	v2[17] = (uint8_t)(0u - sum);
+	io_stub_reset();
+	memset(io_flash, 0xFF, sizeof io_flash);
+	memcpy(io_flash, v2, 18);
+	settings_load(&s);
+	CHECK_EQ(s.root, 7);
+	CHECK_EQ(s.scale, 24);
+	CHECK_EQ(s.pressure_smoothing, 3);
+	CHECK_EQ(s.tuning, 0);
+	CHECK_EQ(s.a4_tenths, 4400);
+}
+
+static void test_tuning_fields_validated(void)
+{
+	struct settings s;
+
+	settings_defaults(&s);
+	s.tuning = 12; /* no such id */
+	CHECK(!settings_valid(&s));
+	s.tuning = 1;  /* 24-EDO doesn't offer Major */
+	CHECK(!settings_valid(&s));
+	s.scale = 32;  /* Maqam Rast */
+	CHECK(settings_valid(&s));
+	s.a4_tenths = 4149;
+	CHECK(!settings_valid(&s));
+	s.a4_tenths = 4660;
+	CHECK(settings_valid(&s));
+	s.a4_tenths = 4661;
+	CHECK(!settings_valid(&s));
+	/* the scale a tuning change keeps */
+	CHECK_EQ(settings_scale_for(0, 5), 5);
+	CHECK_EQ(settings_scale_for(1, 5), 32);
+	CHECK_EQ(settings_scale_for(96, 1), 1);
+	CHECK_EQ(settings_scale_for(96, 7), 16);
+	CHECK_EQ(settings_scale_for(97, 31), 16);
+	CHECK_EQ(settings_scale_for(129, 0), SCALE_ALL_DEGREES);
 }
 
 static void test_blank_flash_loads_defaults(void)
@@ -217,6 +270,8 @@ void test_settings_all(void)
 	RUN(test_velocity_mode_range);
 	RUN(test_smoothing_range);
 	RUN(test_v1_record_loads_with_default_smoothing);
+	RUN(test_v2_record_loads_twelve_edo);
+	RUN(test_tuning_fields_validated);
 	RUN(test_blank_flash_loads_defaults);
 	RUN(test_corrupt_record_loads_defaults);
 	RUN(test_save_waits_for_quiet_and_no_notes);

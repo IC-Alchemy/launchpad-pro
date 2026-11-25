@@ -5,14 +5,17 @@
 #include "midici/ci_pe.h"
 #include "midici/ci_identity.h"
 #include "scales/scales.h"
+#include "scales/tuning.h"
 
 /* The schemas below hard-code the ranges: keep them in step. */
-typedef char ci_pe_scale_count_is_25[(SCALE_COUNT == 25) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_scale_count_is_61[(SCALE_COUNT == 61) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_thresh_count_is_4[(THRESH_COUNT == 4) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_a4_range[(A4_TENTHS_MIN == 4150 && A4_TENTHS_MAX == 4660) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
 
 static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
 	"ResourceList", "DeviceInfo", "ChannelList", "X-ScaleSettings", "X-PlayOptions", "X-ScaleList",
+	"X-TuningList",
 };
 
 /* Lives in flash. ResourceList does not list itself (Common Rules for PE).
@@ -23,11 +26,14 @@ static const char RESOURCE_LIST[] =
 	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Scale\",\"type\":\"object\",\"properties\":{"
 	"\"root\":{\"title\":\"Root (0 = C)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":11},"
-	"\"scale\":{\"title\":\"Scale (X-ScaleList index)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":24},"
+	"\"scale\":{\"title\":\"Scale (X-ScaleList index; one the tuning offers)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":60},"
 	"\"octave\":{\"title\":\"Octave\",\"type\":\"integer\",\"minimum\":0,\"maximum\":7},"
 	"\"layout\":{\"title\":\"Layout\",\"type\":\"string\",\"enum\":[\"inKey4ths\",\"inKey3rds\","
 	"\"inKeySequential\",\"chromatic4ths\",\"chromaticGuitar\"]},"
-	"\"absoluteRoot\":{\"title\":\"Absolute root\",\"type\":\"boolean\"}}}},"
+	"\"absoluteRoot\":{\"title\":\"Absolute root\",\"type\":\"boolean\"},"
+	"\"tuning\":{\"title\":\"Tuning (X-TuningList id)\",\"type\":\"integer\",\"enum\":[0,1,2,3,4,5,6,7,8,9,10,11,"
+	"32,33,34,35,36,37,64,65,66,67,96,97,98,128,129,130,131]},"
+	"\"a4Tenths\":{\"title\":\"A4 (tenths of a Hz)\",\"type\":\"integer\",\"minimum\":4150,\"maximum\":4660}}}},"
 	"{\"resource\":\"X-PlayOptions\",\"canSet\":\"full\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Play options\",\"type\":\"object\",\"properties\":{"
 	"\"velocityMode\":{\"title\":\"Velocity mode\",\"type\":\"string\","
@@ -41,7 +47,11 @@ static const char RESOURCE_LIST[] =
 	"\"dinMirror\":{\"title\":\"Mirror pads to DIN\",\"type\":\"boolean\"},"
 	"\"channel\":{\"title\":\"MIDI channel\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}},"
 	"{\"resource\":\"X-ScaleList\",\"schema\":{\"title\":\"Scale names\",\"type\":\"array\","
-	"\"items\":{\"type\":\"string\"}}}]";
+	"\"items\":{\"type\":\"string\"}}},"
+	"{\"resource\":\"X-TuningList\",\"schema\":{\"title\":\"Tunings\",\"type\":\"array\","
+	"\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},"
+	"\"name\":{\"type\":\"string\"},\"degrees\":{\"type\":\"integer\"},"
+	"\"scales\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}}}}]";
 
 /* Strings for the enum fields, indexed by the settings value. */
 static const char *const LAYOUTS[LAYOUT_COUNT] = {
@@ -169,6 +179,8 @@ static void render_settings(uint8_t res, const struct settings *s, struct ci_jso
 		member_int(o, "octave", s->octave, 1);
 		member_str(o, "layout", s->layout < LAYOUT_COUNT ? LAYOUTS[s->layout] : "", 1);
 		member_bool(o, "absoluteRoot", s->absolute_root);
+		member_int(o, "tuning", s->tuning, 1);
+		member_int(o, "a4Tenths", s->a4_tenths, 1);
 	} else {
 		member_str(o, "velocityMode", s->velocity_mode < 4 ? VEL_MODES[s->velocity_mode] : "", 0);
 		member_str(o, "velocityCurve", s->velocity_curve < 3 ? CURVES[s->velocity_curve] : "", 1);
@@ -181,6 +193,37 @@ static void render_settings(uint8_t res, const struct settings *s, struct ci_jso
 		member_int(o, "channel", s->channel + 1, 1);
 	}
 	ci_json_raw(o, "}");
+}
+
+/* [{"id":0,"name":"12-EDO (Standard)","degrees":12},
+ *  {"id":1,"name":"24-EDO Quarter-Tone","degrees":24,"scales":[32,33,34,35,31]},...]
+ * No "scales": the tuning offers every twelve-note scale, 0..30. */
+static void tuning_list(struct ci_json_out *o)
+{
+	uint8_t i, j;
+
+	ci_json_raw(o, "[");
+	for (i = 0; i < TUNING_COUNT; i++) {
+		const struct tuning_def *t = &TUNINGS[i];
+
+		ci_json_raw(o, i ? ",{" : "{");
+		member_int(o, "id", t->id, 0);
+		member_str(o, "name", t->name, 1);
+		member_int(o, "degrees", t->degrees, 1);
+		if (t->nscales) {
+			ci_json_raw(o, ",");
+			ci_json_key(o, "scales");
+			ci_json_raw(o, "[");
+			for (j = 0; j < t->nscales; j++) {
+				if (j)
+					ci_json_raw(o, ",");
+				ci_json_int(o, t->scales[j]);
+			}
+			ci_json_raw(o, "]");
+		}
+		ci_json_raw(o, "}");
+	}
+	ci_json_raw(o, "]");
 }
 
 void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struct ci_json_out *o)
@@ -212,6 +255,9 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 			ci_json_str(o, SCALES[i].name);
 		}
 		ci_json_raw(o, "]");
+		break;
+	case CI_PE_TUNING_LIST:
+		tuning_list(o);
 		break;
 	default:
 		break;
@@ -248,6 +294,14 @@ static uint8_t set_int(const struct ci_json_member *m, int32_t lo, int32_t hi, i
 	return 1;
 }
 
+static uint8_t set_u16(const struct ci_json_member *m, int32_t lo, int32_t hi, uint16_t *field)
+{
+	if (m->type != CI_JSON_INT || m->num < lo || m->num > hi)
+		return 0;
+	*field = (uint16_t)m->num;
+	return 1;
+}
+
 static uint8_t set_bool(const struct ci_json_member *m, uint8_t *field)
 {
 	if (m->type != CI_JSON_BOOL)
@@ -270,6 +324,7 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 	struct settings t = *s;
 	struct ci_json_it it;
 	struct ci_json_member m;
+	uint8_t scale_given = 0;
 	int r;
 
 	if (!ci_pe_can_set(res))
@@ -281,7 +336,11 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 			if (ci_json_key_is(&m, "root"))
 				ok = set_int(&m, 0, 11, 0, &t.root);
 			else if (ci_json_key_is(&m, "scale"))
-				ok = set_int(&m, 0, SCALE_COUNT - 1, 0, &t.scale);
+				ok = scale_given = set_int(&m, 0, SCALE_COUNT - 1, 0, &t.scale);
+			else if (ci_json_key_is(&m, "tuning"))
+				ok = set_int(&m, 0, 255, 0, &t.tuning) && tuning_find(t.tuning);
+			else if (ci_json_key_is(&m, "a4Tenths"))
+				ok = set_u16(&m, A4_TENTHS_MIN, A4_TENTHS_MAX, &t.a4_tenths);
 			else if (ci_json_key_is(&m, "octave"))
 				ok = set_int(&m, 0, 7, 0, &t.octave);
 			else if (ci_json_key_is(&m, "layout"))
@@ -307,6 +366,11 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 		if (!ok)
 			return CI_PE_STATUS_BAD_REQUEST;
 	}
+	/* a new tuning without a scale keeps the scale if it can, else takes
+	 * the tuning's default; a scale given that the tuning doesn't offer is
+	 * an error (settings_valid) */
+	if (r == 0 && !scale_given)
+		t.scale = settings_scale_for(t.tuning, t.scale);
 	if (r < 0 || !settings_valid(&t))
 		return CI_PE_STATUS_BAD_REQUEST;
 	*s = t;
@@ -318,7 +382,8 @@ uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
 	uint8_t bits = 0;
 
 	if (a->root != b->root || a->scale != b->scale || a->octave != b->octave ||
-	    a->layout != b->layout || a->absolute_root != b->absolute_root)
+	    a->layout != b->layout || a->absolute_root != b->absolute_root ||
+	    a->tuning != b->tuning || a->a4_tenths != b->a4_tenths)
 		bits |= CI_PE_BIT(CI_PE_SCALE_SETTINGS);
 	if (a->velocity_mode != b->velocity_mode || a->velocity_curve != b->velocity_curve ||
 	    a->pressure_mode != b->pressure_mode || a->pressure_threshold != b->pressure_threshold ||

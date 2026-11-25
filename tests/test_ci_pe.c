@@ -5,6 +5,7 @@
 #include "midici/ci_pe.h"
 #include "instrument/settings.h"
 #include "scales/scales.h"
+#include "scales/tuning.h"
 
 static uint16_t render(uint8_t res, const struct settings *s, const char *piid, char *buf, uint16_t cap)
 {
@@ -139,7 +140,7 @@ static void test_pe_lookup(void)
 
 static void test_pe_fixed_resources(void)
 {
-	static char buf[2048];
+	static char buf[4096];
 	struct settings s;
 	uint16_t n;
 
@@ -170,9 +171,16 @@ static void test_pe_fixed_resources(void)
 	CHECK(strstr(buf, SCALES[0].name) != 0);
 	CHECK(strstr(buf, SCALES[SCALE_COUNT - 1].name) != 0);
 
+	render(CI_PE_TUNING_LIST, &s, "", buf, sizeof buf);
+	CHECK(strncmp(buf, "[{\"id\":0,\"name\":\"12-EDO (Standard)\",\"degrees\":12},", 47) == 0);
+	CHECK(strstr(buf, "{\"id\":1,\"name\":\"24-EDO Quarter-Tone\",\"degrees\":24,\"scales\":[32,33,34,35,31]}") != 0);
+	CHECK(strstr(buf, "{\"id\":131,\"name\":\"Carlos Gamma\",\"degrees\":1,\"scales\":[31]}]") != 0);
+	CHECK_EQ(ci_pe_lookup("X-TuningList", 12), CI_PE_TUNING_LIST);
+	CHECK(!ci_pe_can_set(CI_PE_TUNING_LIST));
+
 	/* every resource fits in a window slice by slice */
 	for (uint8_t r = 0; r < CI_PE_RESOURCE_COUNT; r++) {
-		static char whole[2048], part[2048];
+		static char whole[4096], part[4096];
 		uint16_t len = render(r, &s, "PIID", whole, sizeof whole);
 		for (uint16_t at = 0; at < len; at += 37) {
 			struct ci_json_out o;
@@ -214,9 +222,26 @@ static void test_pe_settings_round_trip(void)
 		CHECK(same(&s, &t));
 	}
 
+	/* every tuning with every scale it offers, at a few reference pitches */
+	for (uint8_t i = 0; i < TUNING_COUNT; i++) {
+		const struct tuning_def *tu = &TUNINGS[i];
+		for (uint8_t j = 0; j < tuning_scale_slots(tu); j++) {
+			settings_defaults(&s);
+			s.tuning = tu->id;
+			s.scale = tuning_scale_at(tu, j);
+			s.a4_tenths = (uint16_t)(A4_TENTHS_MIN + (i * 37 + j * 11) % (A4_TENTHS_MAX - A4_TENTHS_MIN + 1));
+			CHECK(settings_valid(&s));
+			settings_defaults(&t);
+			render(CI_PE_SCALE_SETTINGS, &s, "", buf, sizeof buf);
+			CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, buf, &t), CI_PE_STATUS_OK);
+			CHECK(same(&s, &t));
+		}
+	}
+
 	settings_defaults(&s);
 	render(CI_PE_SCALE_SETTINGS, &s, "", buf, sizeof buf);
 	CHECK(strncmp(buf, "{\"root\":", 8) == 0);
+	CHECK(strstr(buf, "\"tuning\":0,\"a4Tenths\":4400}") != 0);
 	CHECK(strstr(buf, "\"absoluteRoot\":") != 0);
 	s.velocity_mode = VEL_TWO_STAGE;
 	s.channel = 15;
@@ -252,7 +277,9 @@ static void test_pe_set_rules(void)
 	/* any bad field rejects the whole Set and changes nothing */
 	before = s;
 	static const char *const BAD_SCALE[] = {
-		"{\"scale\":6,\"root\":12}", "{\"root\":-1}", "{\"scale\":25}", "{\"octave\":8}",
+		"{\"scale\":6,\"root\":12}", "{\"root\":-1}", "{\"scale\":61}", "{\"scale\":31}",
+		"{\"tuning\":12}", "{\"tuning\":1,\"scale\":0}", "{\"a4Tenths\":4149}", "{\"a4Tenths\":4661}",
+		"{\"a4Tenths\":440.5}", "{\"octave\":8}",
 		"{\"layout\":\"diagonal\"}", "{\"layout\":2}", "{\"absoluteRoot\":1}", "{\"root\":\"3\"}",
 		"{\"root\":3.0}", "{\"root\":null}", "{\"scale\":6", "[1]", "",
 	};
@@ -269,6 +296,24 @@ static void test_pe_set_rules(void)
 		CHECK_EQ(apply(CI_PE_PLAY_OPTIONS, BAD_PLAY[i], &s), CI_PE_STATUS_BAD_REQUEST);
 		CHECK(same(&s, &before));
 	}
+
+	/* a tuning without a scale keeps the scale if offered, else takes the
+	 * tuning's default */
+	settings_defaults(&s);
+	s.scale = 1;
+	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"tuning\":96}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.tuning, 96);
+	CHECK_EQ(s.scale, 1);
+	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"tuning\":3,\"a4Tenths\":4320}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.scale, 39);
+	CHECK_EQ(s.a4_tenths, 4320);
+	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"scale\":40,\"tuning\":3}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.scale, 40);
+	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"tuning\":0}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.scale, 0);
+	settings_defaults(&s);
+	s.root = 3;
+	before = s;
 
 	/* a Scale field in a PlayOptions Set is an unknown field there */
 	CHECK_EQ(apply(CI_PE_PLAY_OPTIONS, "{\"root\":11,\"channel\":2,\"dinMirror\":true}", &s), CI_PE_STATUS_OK);

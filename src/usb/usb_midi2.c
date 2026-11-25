@@ -188,6 +188,17 @@ void hal_send_note_on2(u8 port, u8 ch, u8 note, u16 velocity)
 	}
 }
 
+void hal_send_note_on2_pitch(u8 port, u8 ch, u8 note, u16 velocity, u16 pitch79)
+{
+	if (standalone_midi2(port)) {
+		uint32_t m[2];
+		ump_m2_note_on_attr(m, 0, ch, note & 0x7F, velocity, 3, pitch79);
+		send_attack(0, ch, note, m, 2);
+	} else {
+		hal_send_note_on2(port, ch, note, velocity);
+	}
+}
+
 void hal_send_note_off2(u8 port, u8 ch, u8 note, u16 velocity)
 {
 	if (standalone_midi2(port)) {

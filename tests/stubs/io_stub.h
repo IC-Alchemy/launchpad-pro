@@ -7,6 +7,8 @@ struct io_ev {
 	char kind; /* 'N' note on, 'F' note off, 'P' poly, 'C' channel pressure */
 	uint8_t port, ch, note;
 	uint32_t v;
+	uint8_t has_pitch; /* 'N' only: a Pitch 7.9 attribute */
+	uint16_t pitch;
 };
 
 extern struct io_ev io_log[256];

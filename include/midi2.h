@@ -26,6 +26,10 @@ u8 midi2_usb_alt(void);
  * to 7 bits (velocity: top 7 of 16 bits, Note On at least 1; pressure: top 7
  * of 32 bits). Otherwise a MIDI 2.0 Channel Voice message is sent. */
 void hal_send_note_on2(u8 port, u8 ch, u8 note, u16 velocity);
+/* A Note On that carries its pitch: MIDI 2.0 attribute type 3 (Pitch 7.9,
+ * semitones * 512) where the destination speaks MIDI 2.0; elsewhere the plain
+ * Note On of hal_send_note_on2. */
+void hal_send_note_on2_pitch(u8 port, u8 ch, u8 note, u16 velocity, u16 pitch79);
 void hal_send_note_off2(u8 port, u8 ch, u8 note, u16 velocity);
 void hal_send_poly_pressure2(u8 port, u8 ch, u8 note, u32 value);
 void hal_send_channel_pressure2(u8 port, u8 ch, u32 value);
