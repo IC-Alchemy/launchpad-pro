@@ -8,6 +8,7 @@
 
 /* The schemas below hard-code the ranges: keep them in step. */
 typedef char ci_pe_scale_count_is_25[(SCALE_COUNT == 25) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_thresh_count_is_4[(THRESH_COUNT == 4) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
 
 static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
@@ -33,7 +34,8 @@ static const char RESOURCE_LIST[] =
 	"\"enum\":[\"peakWindow\",\"zeroLatency\",\"twoStage\",\"fixed\"]},"
 	"\"velocityCurve\":{\"title\":\"Velocity curve\",\"type\":\"string\",\"enum\":[\"soft\",\"linear\",\"hard\"]},"
 	"\"pressureMode\":{\"title\":\"Pressure\",\"type\":\"string\",\"enum\":[\"poly\",\"channel\",\"off\"]},"
-	"\"pressureThreshold\":{\"title\":\"Pressure threshold\",\"type\":\"string\",\"enum\":[\"low\",\"med\",\"high\"]},"
+	"\"pressureThreshold\":{\"title\":\"Pressure threshold\",\"type\":\"string\","
+	"\"enum\":[\"low\",\"med\",\"high\",\"instant\"]},"
 	"\"pressureSmoothing\":{\"title\":\"Pressure smoothing\",\"type\":\"string\","
 	"\"enum\":[\"none\",\"light\",\"medium\",\"heavy\"]},"
 	"\"dinMirror\":{\"title\":\"Mirror pads to DIN\",\"type\":\"boolean\"},"
@@ -48,7 +50,7 @@ static const char *const LAYOUTS[LAYOUT_COUNT] = {
 static const char *const VEL_MODES[4] = {"peakWindow", "zeroLatency", "fixed", "twoStage"};
 static const char *const CURVES[3] = {"soft", "linear", "hard"};
 static const char *const PRESSURES[3] = {"poly", "channel", "off"};
-static const char *const THRESHOLDS[3] = {"low", "med", "high"};
+static const char *const THRESHOLDS[THRESH_COUNT] = {"low", "med", "high", "instant"};
 static const char *const SMOOTHINGS[4] = {"none", "light", "medium", "heavy"};
 
 uint8_t ci_pe_lookup(const char *name, uint16_t len)
@@ -172,7 +174,7 @@ static void render_settings(uint8_t res, const struct settings *s, struct ci_jso
 		member_str(o, "velocityCurve", s->velocity_curve < 3 ? CURVES[s->velocity_curve] : "", 1);
 		member_str(o, "pressureMode", s->pressure_mode < 3 ? PRESSURES[s->pressure_mode] : "", 1);
 		member_str(o, "pressureThreshold",
-		           s->pressure_threshold < 3 ? THRESHOLDS[s->pressure_threshold] : "", 1);
+		           s->pressure_threshold < THRESH_COUNT ? THRESHOLDS[s->pressure_threshold] : "", 1);
 		member_str(o, "pressureSmoothing",
 		           s->pressure_smoothing < 4 ? SMOOTHINGS[s->pressure_smoothing] : "", 1);
 		member_bool(o, "dinMirror", s->din_mirror);
@@ -294,7 +296,7 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 			else if (ci_json_key_is(&m, "pressureMode"))
 				ok = set_enum(&m, PRESSURES, 3, &t.pressure_mode);
 			else if (ci_json_key_is(&m, "pressureThreshold"))
-				ok = set_enum(&m, THRESHOLDS, 3, &t.pressure_threshold);
+				ok = set_enum(&m, THRESHOLDS, THRESH_COUNT, &t.pressure_threshold);
 			else if (ci_json_key_is(&m, "pressureSmoothing"))
 				ok = set_enum(&m, SMOOTHINGS, 4, &t.pressure_smoothing);
 			else if (ci_json_key_is(&m, "dinMirror"))

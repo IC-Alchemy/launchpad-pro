@@ -48,8 +48,19 @@ uint16_t pad_curve(uint16_t v, uint8_t curve);
 #define PRESSURE_START_MED  2048
 #define PRESSURE_START_HIGH 2304
 
-/* Normalise a raw 12-bit reading to 0..4095; threshold is THRESH_*. */
+/* Normalise a raw 12-bit reading to 0..4095; threshold is THRESH_*
+ * (THRESH_INSTANT assumes the app's PAD_LIB_THRESHOLD trigger calibration;
+ * pad_engine uses the live one through pad_pressure_start). */
 uint16_t pad_pressure12(uint16_t raw12, uint8_t threshold);
+
+/* Raw 12-bit start of the pressure range for a threshold setting. For
+ * THRESH_INSTANT it is where velocity sensing starts, (trigger10 + 80) * 4
+ * (pad_velocity16_raw12), capped at PRESSURE_START_LOW, so aftertouch follows
+ * the finger from first contact. trigger10 is PadCalibration[0]. */
+uint16_t pad_pressure_start(uint8_t threshold, uint16_t trigger10);
+
+/* pad_pressure12 with an explicit raw start (below PRESSURE_FULL_RAW). */
+uint16_t pad_pressure12_from(uint16_t raw12, uint16_t start);
 
 /* Replicate 12 bits across 32 for MIDI 2.0: (p<<20)|(p<<8)|(p>>4). */
 uint32_t pad_pressure32(uint16_t p12);

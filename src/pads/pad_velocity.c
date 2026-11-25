@@ -1,5 +1,6 @@
 #include "pads/pad_velocity.h"
 #include "instrument/settings.h"
+#include "platform/pads.h"
 
 /* offset the library adds above the trigger threshold before its own
  * velocity starts counting (cx_pad.o pad_calculate: lr - threshold - 80) */
@@ -95,22 +96,33 @@ uint16_t pad_curve(uint16_t v, uint8_t curve)
     return r == 0 ? 1 : (uint16_t)r;
 }
 
-uint16_t pad_pressure12(uint16_t raw12, uint8_t threshold)
+uint16_t pad_pressure_start(uint8_t threshold, uint16_t trigger10)
 {
-    uint32_t start;
+    uint32_t s;
 
     switch (threshold)
     {
     case THRESH_LOW:
-        start = PRESSURE_START_LOW;
-        break;
+        return PRESSURE_START_LOW;
     case THRESH_HIGH:
-        start = PRESSURE_START_HIGH;
-        break;
+        return PRESSURE_START_HIGH;
+    case THRESH_INSTANT:
+        s = ((uint32_t)trigger10 + PAD_VELOCITY_OFFSET) * 4u;
+        return (uint16_t)(s < PRESSURE_START_LOW ? s : PRESSURE_START_LOW);
     default:
-        start = PRESSURE_START_MED;
-        break;
+        return PRESSURE_START_MED;
     }
+}
+
+uint16_t pad_pressure12(uint16_t raw12, uint8_t threshold)
+{
+    return pad_pressure12_from(raw12, pad_pressure_start(threshold, PAD_LIB_THRESHOLD));
+}
+
+uint16_t pad_pressure12_from(uint16_t raw12, uint16_t start16)
+{
+    uint32_t start = start16 < PRESSURE_FULL_RAW ? start16 : PRESSURE_FULL_RAW - 1;
+
     if (raw12 <= start)
     {
         return 0;
@@ -119,7 +131,7 @@ uint16_t pad_pressure12(uint16_t raw12, uint8_t threshold)
     {
         return 4095;
     }
-    /* (raw - start) * 4095 < 1284 * 4095, fits 32 bits */
+    /* (raw - start) * 4095 < 3076 * 4095, fits 32 bits */
     return (uint16_t)(((uint32_t)(raw12 - start) * 4095u) / (PRESSURE_FULL_RAW - start));
 }
 

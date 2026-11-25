@@ -150,7 +150,7 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 			it->field = &g_s.velocity_mode;
 			it->value = VEL_AT[c];
 			it->kind = K_VELOCITY;
-		} else if (r >= 5 && r < 8 && c < 3) {
+		} else if (r >= 5 && r < 8 && c < (r == 5 ? THRESH_COUNT : 3)) {
 			uint8_t *rows[3] = {&g_s.pressure_threshold, &g_s.pressure_mode,
 			                    &g_s.velocity_curve};
 			it->field = rows[r - 5];

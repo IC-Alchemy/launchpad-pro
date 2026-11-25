@@ -200,7 +200,7 @@ static void test_pe_settings_round_trip(void)
 		s.velocity_mode = (uint8_t)(v % 4);
 		s.velocity_curve = (uint8_t)(v % 3);
 		s.pressure_mode = (uint8_t)((v + 1) % 3);
-		s.pressure_threshold = (uint8_t)((v + 2) % 3);
+		s.pressure_threshold = (uint8_t)((v + 2) % THRESH_COUNT);
 		s.pressure_smoothing = (uint8_t)((v + 3) % 4);
 		s.din_mirror = (v >> 1) & 1;
 		s.channel = (uint8_t)(v % 16);
@@ -242,6 +242,12 @@ static void test_pe_set_rules(void)
 	CHECK_EQ(s.root, 3);
 	CHECK_EQ(s.octave, 4);
 	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{}", &s), CI_PE_STATUS_OK);
+
+	/* instant aftertouch is a fourth pressure threshold */
+	CHECK_EQ(apply(CI_PE_PLAY_OPTIONS, "{\"pressureThreshold\":\"instant\"}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.pressure_threshold, THRESH_INSTANT);
+	CHECK_EQ(apply(CI_PE_PLAY_OPTIONS, "{\"pressureThreshold\":\"med\"}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.pressure_threshold, THRESH_MED);
 
 	/* any bad field rejects the whole Set and changes nothing */
 	before = s;
