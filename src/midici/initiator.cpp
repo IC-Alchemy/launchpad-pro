@@ -35,6 +35,7 @@ constexpr uint16_t kDeviceInfoHeaderLen = sizeof(kDeviceInfoHeader) - 1u;
 struct PendingGet {
 	uint32_t peer_muid;
 	uint32_t start_ms;
+	uint32_t timeout_ms;
 	uint16_t expect_chunk;
 	uint16_t rx_len;
 	uint16_t status;
@@ -293,6 +294,7 @@ bool try_send_pe_get(uint8_t idx, uint32_t now_ms)
 	pe_get = {};
 	pe_get.peer_muid = peers[idx].muid;
 	pe_get.start_ms = now_ms;
+	pe_get.timeout_ms = CI_PE_GET_TIMEOUT_MS;
 	pe_get.expect_chunk = 1u;
 	pe_get.req_id = rid;
 	pe_get.active = true;
@@ -553,6 +555,8 @@ void handle_pe_get_reply(const ms::ParsedMessage &m, const uint8_t *payload)
 		update_complete(idx);
 	} else {
 		pe_get.expect_chunk++;
+		pe_get.start_ms = last_now_ms;
+		pe_get.timeout_ms = CI_PE_GET_TIMEOUT_MS;
 	}
 }
 
@@ -562,6 +566,12 @@ void handle_nak(const ms::ParsedMessage &m)
 	if (idx_i < 0)
 		return;
 	const uint8_t idx = static_cast<uint8_t>(idx_i);
+	if (m.HasAcknowledgmentFields &&
+	    m.Acknowledgment.OriginalMessageType == static_cast<uint8_t>(T::PropertyGetDataInquiry) &&
+	    (m.Acknowledgment.StatusCode == 0x20u || m.Acknowledgment.StatusCode == 0x42u) &&
+	    (!pe_get.active || pe_get.peer_muid != m.SourceMuid || pe_get.req_id != m.Acknowledgment.Details[0] ||
+	     (m.Acknowledgment.StatusCode == 0x20u && m.Acknowledgment.StatusData != 0u)))
+		return;
 	if (m.HasAcknowledgmentFields &&
 	    m.Acknowledgment.OriginalMessageType == static_cast<uint8_t>(T::ProfileInquiry) &&
 	    (m.DeviceId != ms::DeviceIdFunctionBlock || !(in_flight_mask(idx) & RX_PROFILE)))
@@ -630,7 +640,7 @@ void midici_initiator_tick(uint32_t now_ms)
 		}
 	}
 
-	if (pe_get.active && static_cast<uint32_t>(now_ms - pe_get.start_ms) >= CI_PE_GET_TIMEOUT_MS) {
+	if (pe_get.active && static_cast<uint32_t>(now_ms - pe_get.start_ms) >= pe_get.timeout_ms) {
 		const int idx_i = find_peer(pe_get.peer_muid);
 		if (idx_i >= 0)
 			fail_pe_get(static_cast<uint8_t>(idx_i));
@@ -744,6 +754,13 @@ bool midici_initiator_on_message(uint8_t group, const uint8_t *payload, uint16_t
 		return true;
 	case T::PropertyGetDataReply:
 		handle_pe_get_reply(m, payload);
+		return true;
+	case T::Ack:
+		if (m.DeviceId == ms::DeviceIdFunctionBlock && m.HasAcknowledgmentFields &&
+		    m.Acknowledgment.StatusCode == 0x10u &&
+		    m.Acknowledgment.OriginalMessageType == static_cast<uint8_t>(T::PropertyGetDataInquiry) &&
+		    pe_get.active && pe_get.peer_muid == m.SourceMuid && pe_get.req_id == m.Acknowledgment.Details[0])
+			pe_get.timeout_ms += static_cast<uint32_t>(m.Acknowledgment.StatusData) * 100u;
 		return true;
 	case T::Nak:
 		handle_nak(m);

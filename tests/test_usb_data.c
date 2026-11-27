@@ -746,6 +746,51 @@ static void test_ci_pe_surface_settings(void)
 	CHECK(strstr(body, "\"Standalone Right\",\"channel\":5") != 0);
 }
 
+static void test_ci_pe_v12_flow_encoding_partial_and_busy(void)
+{
+	static char hdr[64], body[4096], want[4096];
+
+	pe_setup(128, 1);
+	pe_send(0x34, 1, "{\"resource\":\"ResourceList\",\"flowControl\":true}", "");
+	host_in_pe();
+	pe_reply(0x35, 1, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":406}") == 0);
+	pe_send(0x34, 2, "{\"resource\":\"DeviceInfo\",\"mutualEncoding\":\"Mcoded7\"}", "");
+	host_in_pe();
+	pe_reply(0x35, 2, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":415}") == 0);
+
+	pe_send(0x36, 3, "{\"resource\":\"X-ScaleSettings\",\"setPartial\":true}", "{\"/root\":8}");
+	host_in_pe();
+	pe_reply(0x37, 3, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	CHECK_EQ(fake_s.root, 8);
+
+	/* Starting a competing Get must not replace the active multi-chunk reply. */
+	pe_send(0x34, 4, "{\"resource\":\"X-ScaleList\"}", "");
+	pe_send_from(PE_OTHER, 0x34, 5, "{\"resource\":\"DeviceInfo\"}", 1, 1, "", 0);
+	host_in_pe();
+	uint16_t busy = 0, chunks = 0, len = 0;
+	for (uint16_t i = 0; i < pe_count; i++) {
+		struct pe_view v;
+		pe_view(&pe_rx[i], &v);
+		if (v.req == 5) {
+			CHECK_MEM(v.hdr, "{\"status\":343}", 14);
+			busy++;
+		} else {
+			CHECK_EQ(v.req, 4);
+			CHECK_EQ(v.num, ++chunks);
+			CHECK(len + v.data_len <= sizeof body);
+			memcpy(body + len, v.data, v.data_len);
+			len += v.data_len;
+		}
+	}
+	CHECK_EQ(busy, 1);
+	CHECK_EQ(len, pe_render(CI_PE_SCALE_LIST, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, len);
+	midici_pe_bind(0, 0);
+}
+
 static void test_ci_pe_subscribe(void)
 {
 	static char hdr[64], body[8];
@@ -787,9 +832,12 @@ static void test_ci_pe_subscribe(void)
 	fake_s.channel = 4;
 	pe_expect_notify(0, 0, 0);
 
-	/* the latest subscriber wins */
-	pe_subscribe(PE_ME, 5, "X-ScaleSettings");
-	id = pe_subscribe(PE_OTHER, 6, "X-ScaleSettings");
+	/* A competing start gets 343 and the original subscription stays active. */
+	id = pe_subscribe(PE_OTHER, 5, "X-ScaleSettings");
+	pe_send(0x38, 6, "{\"command\":\"start\",\"resource\":\"X-ScaleSettings\"}", "");
+	host_in_pe();
+	pe_reply(0x39, 6, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":343}") == 0);
 	fake_s.octave = 6;
 	pe_expect_notify(PE_OTHER, id, CI_PE_SCALE_SETTINGS);
 
@@ -2015,6 +2063,7 @@ void test_usb_data_all(void)
 	RUN(test_ci_pe_capabilities_and_get);
 	RUN(test_ci_pe_small_initiator_and_terminate);
 	RUN(test_ci_pe_set);
+	RUN(test_ci_pe_v12_flow_encoding_partial_and_busy);
 	RUN(test_ci_pe_subscribe);
 	RUN(test_ci_pe_one_chunk_per_pass_and_backpressure);
 	RUN(test_ci_pe_multi_muid_max_sysex_cache);

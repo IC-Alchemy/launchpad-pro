@@ -171,7 +171,7 @@ static void test_pe_fixed_resources(void)
 
 	render(CI_PE_SCALE_LIST, &s, "", buf, sizeof buf);
 	CHECK(buf[0] == '[');
-	CHECK(strncmp(buf + 1, "\"", 1) == 0);
+	CHECK(strncmp(buf + 1, "{\"name\":", 8) == 0);
 	CHECK(strstr(buf, SCALES[0].name) != 0);
 	CHECK(strstr(buf, SCALES[SCALE_COUNT - 1].name) != 0);
 
@@ -410,7 +410,7 @@ static void test_pe_surface_settings(void)
 	{
 		static char list[4096];
 		render(CI_PE_RESOURCE_LIST, &s, "", list, sizeof list);
-		CHECK(strstr(list, "{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"full\",\"canSubscribe\":true,") != 0);
+		CHECK(strstr(list, "{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,") != 0);
 		for (uint8_t p = 0; p < PALETTE_COUNT; p++) {
 			char quoted[24];
 			snprintf(quoted, sizeof quoted, "\"%s\"", palette_name(p));

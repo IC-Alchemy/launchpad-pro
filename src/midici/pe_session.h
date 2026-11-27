@@ -9,7 +9,7 @@
  * One request at a time (PE Capabilities says 1). Every outgoing PE message
  * is built a chunk at a time by poll() straight into the midici reply buffer,
  * as CiTxQueue has room, so a reply longer than the queue still goes out
- * whole. A new request replaces a reply still being sent.
+ * whole. Competing requests receive status 343.
  */
 
 #include <stddef.h>
@@ -46,6 +46,8 @@ void forget_initiator(uint32_t muid);
  * whole message from the 0x7E. */
 void handle(const WindowsMidiServicesCapabilityInquiry::ParsedMessage &message, const uint8_t *payload,
             size_t len, uint32_t my_muid, const char *piid);
+
+void terminate(uint32_t source, uint8_t original_type, uint8_t request_id);
 
 /* Main loop: notices settings changes for subscribers and sends at most one
  * chunk per pass when CiTxQueue has room. */

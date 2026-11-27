@@ -25,7 +25,7 @@ static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
 static const char RESOURCE_LIST[] =
 	"[{\"resource\":\"DeviceInfo\"},"
 	"{\"resource\":\"ChannelList\"},"
-	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Scale\",\"type\":\"object\",\"properties\":{"
 	"\"root\":{\"title\":\"Root (0 = C)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":11},"
 	"\"scale\":{\"title\":\"Scale (X-ScaleList index; one the tuning offers)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":60},"
@@ -36,7 +36,7 @@ static const char RESOURCE_LIST[] =
 	"\"tuning\":{\"title\":\"Tuning (X-TuningList id)\",\"type\":\"integer\",\"enum\":[0,1,2,3,4,5,6,7,8,9,10,11,"
 	"32,33,34,35,36,37,64,65,66,67,96,97,98,128,129,130,131]},"
 	"\"a4Tenths\":{\"title\":\"A4 (tenths of a Hz)\",\"type\":\"integer\",\"minimum\":4150,\"maximum\":4660}}}},"
-	"{\"resource\":\"X-PlayOptions\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"{\"resource\":\"X-PlayOptions\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Play options\",\"type\":\"object\",\"properties\":{"
 	"\"velocityMode\":{\"title\":\"Velocity mode\",\"type\":\"string\","
 	"\"enum\":[\"peakWindow\",\"zeroLatency\",\"twoStage\",\"fixed\"]},"
@@ -49,12 +49,12 @@ static const char RESOURCE_LIST[] =
 	"\"dinMirror\":{\"title\":\"Mirror pads to DIN\",\"type\":\"boolean\"},"
 	"\"channel\":{\"title\":\"MIDI channel\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}},"
 	"{\"resource\":\"X-ScaleList\",\"schema\":{\"title\":\"Scale names\",\"type\":\"array\","
-	"\"items\":{\"type\":\"string\"}}},"
+	"\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}}},"
 	"{\"resource\":\"X-TuningList\",\"schema\":{\"title\":\"Tunings\",\"type\":\"array\","
 	"\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},"
 	"\"name\":{\"type\":\"string\"},\"degrees\":{\"type\":\"integer\"},"
 	"\"scales\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}}}},"
-	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Surface\",\"type\":\"object\",\"properties\":{"
 	"\"palette\":{\"title\":\"Palette (whole grid, lower or left)\",\"type\":\"string\",\"enum\":["
 	"\"ocean\",\"citrus\",\"glacier\",\"contrast\"]},"
@@ -278,7 +278,9 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 		for (i = 0; i < SCALE_COUNT; i++) {
 			if (i)
 				ci_json_raw(o, ",");
+			ci_json_raw(o, "{\"name\":");
 			ci_json_str(o, SCALES[i].name);
+			ci_json_raw(o, "}");
 		}
 		ci_json_raw(o, "]");
 		break;
@@ -359,7 +361,7 @@ static uint8_t set_palette(const struct ci_json_member *m, uint8_t *field)
 	return 0;
 }
 
-uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s)
+uint16_t ci_pe_apply_set_mode(uint8_t res, const char *body, uint16_t len, struct settings *s, uint8_t partial)
 {
 	struct settings t = *s;
 	struct ci_json_it it;
@@ -373,7 +375,15 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 		return res < CI_PE_RESOURCE_COUNT ? CI_PE_STATUS_NOT_ALLOWED : CI_PE_STATUS_NOT_FOUND;
 	ci_json_it_init(&it, body, len);
 	while ((r = ci_json_next(&it, &m)) == 1) {
-		uint8_t ok = 1;
+		uint8_t ok = !partial; /* unknown legacy full-Set members are ignored */
+		if (partial) {
+			/* These resources are flat and only have scalar writable properties. */
+			if (m.key_len < 2 || m.key[0] != '/' ||
+			    m.type == CI_JSON_NULL || m.type == CI_JSON_OTHER)
+				return CI_PE_STATUS_BAD_REQUEST;
+			m.key++;
+			m.key_len--;
+		}
 		if (res == CI_PE_SCALE_SETTINGS) {
 			if (ci_json_key_is(&m, "root"))
 				ok = set_int(&m, 0, 11, 0, &t.root);
@@ -436,6 +446,11 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 		return CI_PE_STATUS_BAD_REQUEST;
 	*s = t;
 	return CI_PE_STATUS_OK;
+}
+
+uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s)
+{
+	return ci_pe_apply_set_mode(res, body, len, s, 0);
 }
 
 uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)

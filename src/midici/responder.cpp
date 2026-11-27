@@ -122,6 +122,15 @@ size_t respond(const uint8_t *payload, size_t len, uint8_t *out, size_t capacity
 	if (message.Type == T::Discovery && !self_src)
 		lp_pe::note_initiator(message.SourceMuid,
 			ms::ReadMuid(payload + ms::CommonHeaderByteCount + 12));	/* Receivable Maximum SysEx Size */
+	if (message.Type == T::Nak && message.DeviceId == ms::DeviceIdFunctionBlock &&
+	    message.HasAcknowledgmentFields) {
+		const auto &nak = message.Acknowledgment;
+		if ((nak.StatusCode == 0x20u && nak.StatusData == 1u) || nak.StatusCode == 0x42u) {
+			lp_pe::terminate(message.SourceMuid, nak.OriginalMessageType, nak.Details[0]);
+			if (nak.StatusCode == 0x20u)
+				return 0;
+		}
+	}
 	if (ms::MessageTypeCarriesPropertyExchangeData(message.Type)) {
 		/* Property Exchange is ours (pe_session.cpp), on the Function Block only */
 		if (message.DeviceId != ms::DeviceIdFunctionBlock)

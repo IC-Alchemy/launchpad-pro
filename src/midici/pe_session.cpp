@@ -3,6 +3,7 @@
 extern "C" {
 #include "midici/ci_json.h"
 #include "midici/ci_pe.h"
+#include "midici/initiator.h"
 #include "midici/midici.h"
 }
 
@@ -47,6 +48,8 @@ Outgoing out;
 /* A Set arriving in chunks. */
 struct SetRx {
 	bool active;
+	bool partial;
+	uint32_t last_chunk_ms;
 	uint32_t source;
 	uint8_t request_id;
 	uint8_t resource;
@@ -260,7 +263,8 @@ struct Header {
 	uint8_t resource = CI_PE_NONE;
 	bool has_resource = false;
 	bool set_partial = false;
-	bool non_ascii = false;
+	bool unsupported_format = false;
+	bool flow_control = false;
 	enum { NONE, START, END, OTHER } command = NONE;
 	bool has_sub_id = false;
 	int32_t sub_id = -1;
@@ -284,9 +288,15 @@ Header parse_header(const uint8_t *p, uint16_t n)
 				h.malformed = true;
 			}
 		} else if (ci_json_key_is(&m, "setPartial")) {
+			h.malformed |= m.type != CI_JSON_BOOL;
 			h.set_partial = m.type == CI_JSON_BOOL && m.num;
 		} else if (ci_json_key_is(&m, "mutualEncoding")) {
-			h.non_ascii = !ci_json_str_is(&m, "ASCII");
+			h.unsupported_format |= !ci_json_str_is(&m, "ASCII");
+		} else if (ci_json_key_is(&m, "mediaType")) {
+			h.unsupported_format |= !ci_json_str_is(&m, "application/json");
+		} else if (ci_json_key_is(&m, "flowControl")) {
+			h.malformed |= m.type != CI_JSON_BOOL;
+			h.flow_control = m.type == CI_JSON_BOOL && m.num;
 		} else if (ci_json_key_is(&m, "command")) {
 			h.command = ci_json_str_is(&m, "start") ? Header::START
 			          : ci_json_str_is(&m, "end")   ? Header::END
@@ -311,7 +321,7 @@ Header parse_header(const uint8_t *p, uint16_t n)
 
 bool settings_resource(uint8_t r)
 {
-	return r == CI_PE_CHANNEL_LIST || r == CI_PE_SCALE_SETTINGS || r == CI_PE_PLAY_OPTIONS;
+	return r == CI_PE_CHANNEL_LIST || ci_pe_can_set(r);
 }
 
 /* A resource that exists and can be served now. */
@@ -325,7 +335,7 @@ uint8_t available(const Header &h)
 void on_get(const ms::ParsedMessage &m, const uint8_t *payload, const char *piid)
 {
 	const auto &pe = m.PropertyExchange;
-	if (pe.ChunkNumber != 1 || pe.ChunkCount != 1) {
+	if (pe.ChunkNumber != 1 || pe.ChunkCount != 1 || pe.DataByteCount != 0) {
 		reply_status(static_cast<uint8_t>(T::PropertyGetDataReply), m, CI_PE_STATUS_BAD_REQUEST);
 		return;
 	}
@@ -334,6 +344,11 @@ void on_get(const ms::ParsedMessage &m, const uint8_t *payload, const char *piid
 	if (h.malformed || !h.has_resource || r == CI_PE_NONE) {
 		reply_status(static_cast<uint8_t>(T::PropertyGetDataReply), m,
 		             h.malformed || !h.has_resource ? CI_PE_STATUS_BAD_REQUEST : CI_PE_STATUS_NOT_FOUND);
+		return;
+	}
+	if (h.flow_control || h.unsupported_format) {
+		reply_status(static_cast<uint8_t>(T::PropertyGetDataReply), m,
+		             h.flow_control ? CI_PE_STATUS_UNSUPPORTED_FLOW : CI_PE_STATUS_UNSUPPORTED_ENCODING);
 		return;
 	}
 	HeaderWriter w;
@@ -360,7 +375,7 @@ void finish_set(const ms::ParsedMessage &m)
 		status = CI_PE_STATUS_TOO_LARGE;
 	if (!status) {
 		struct settings next = *settings_get();
-		status = ci_pe_apply_set(set_rx.resource, set_body, set_rx.len, &next);
+		status = ci_pe_apply_set_mode(set_rx.resource, set_body, set_rx.len, &next, set_rx.partial);
 		if (status == CI_PE_STATUS_OK) {
 			const struct settings before = *settings_get();
 			settings_apply(&next);
@@ -383,21 +398,28 @@ void on_set(const ms::ParsedMessage &m, const uint8_t *payload)
 		set_rx.source = m.SourceMuid;
 		set_rx.request_id = pe.RequestId;
 		set_rx.resource = available(h);
+		set_rx.partial = h.set_partial;
 		set_rx.len = 0;
 		set_rx.overflow = false;
 		set_rx.chunk_count = pe.ChunkCount;
 		set_rx.next_chunk = 1;
-		if (h.malformed || !h.has_resource || h.set_partial || h.non_ascii || pe.ChunkCount == 0)
+		if (h.malformed || !h.has_resource)
 			set_rx.status = CI_PE_STATUS_BAD_REQUEST;
+		else if (h.flow_control)
+			set_rx.status = CI_PE_STATUS_UNSUPPORTED_FLOW;
+		else if (h.unsupported_format)
+			set_rx.status = CI_PE_STATUS_UNSUPPORTED_ENCODING;
 		else if (set_rx.resource == CI_PE_NONE)
 			set_rx.status = CI_PE_STATUS_NOT_FOUND;
 		else if (!ci_pe_can_set(set_rx.resource) || !settings_apply)
 			set_rx.status = CI_PE_STATUS_NOT_ALLOWED;
 		else
 			set_rx.status = 0;
-	} else if (!set_rx.active || set_rx.source != m.SourceMuid || set_rx.request_id != pe.RequestId ||
-	           pe.ChunkNumber != set_rx.next_chunk || pe.ChunkCount != set_rx.chunk_count) {
-		/* a chunk out of order, or of a Set we never saw start */
+	} else if (!set_rx.active || pe.ChunkNumber == 0 || pe.HeaderByteCount != 0 ||
+	           pe.ChunkNumber != set_rx.next_chunk ||
+	           (pe.ChunkCount != set_rx.chunk_count &&
+	            !(set_rx.chunk_count == 0 && pe.ChunkCount == pe.ChunkNumber))) {
+		/* A malformed continuation cannot apply a partial update. */
 		set_rx.active = false;
 		reply_status(set_reply, m, CI_PE_STATUS_BAD_REQUEST);
 		return;
@@ -411,8 +433,10 @@ void on_set(const ms::ParsedMessage &m, const uint8_t *payload)
 			set_body[set_rx.len++] = static_cast<char>(payload[pe.DataOffset + i] & 0x7F);
 		}
 	}
+	set_rx.last_chunk_ms = midici_initiator_now_ms();
 	set_rx.next_chunk++;
-	if (pe.ChunkNumber >= set_rx.chunk_count)
+	/* Reject unsupported flow control immediately, before the sender waits for ACK. */
+	if ((pe.ChunkCount != 0 && pe.ChunkNumber >= pe.ChunkCount) || set_rx.status)
 		finish_set(m);
 }
 
@@ -436,11 +460,17 @@ void on_subscription(const ms::ParsedMessage &m, const uint8_t *payload)
 			reply_status(reply, m, r == CI_PE_NONE ? CI_PE_STATUS_NOT_FOUND : CI_PE_STATUS_NOT_ALLOWED);
 			return;
 		}
-		/* one subscriber per resource: the latest wins */
+		/* The firmware has one subscription slot per resource. */
+		if (subs[i].active && subs[i].muid != m.SourceMuid) {
+			reply_status(reply, m, CI_PE_STATUS_TOO_MANY);
+			return;
+		}
+		if (!subs[i].active) {
+			subs[i].id = next_sub_id;
+			next_sub_id = static_cast<uint16_t>(next_sub_id % 9999 + 1);
+		}
 		subs[i].active = true;
 		subs[i].muid = m.SourceMuid;
-		subs[i].id = next_sub_id;
-		next_sub_id = static_cast<uint16_t>(next_sub_id % 9999 + 1);
 		notify_pending &= static_cast<uint8_t>(~CI_PE_BIT(r));
 		HeaderWriter w;
 		ci_json_raw(&w.o, "{\"status\":200,\"subscribeId\":");
@@ -473,11 +503,28 @@ void on_notify(const ms::ParsedMessage &m, const uint8_t *payload)
 		out.active = false;
 }
 
-void requeue_interrupted_notify()
+void reply_busy(const ms::ParsedMessage &m, uint32_t my_muid)
 {
-	/* a notify cut short by a reply: send it again, in full, afterwards */
-	if (out.active && out.type == static_cast<uint8_t>(T::PropertySubscriptionInquiry) && out.next_chunk > 1)
-		notify_pending |= CI_PE_BIT(out.resource);
+	constexpr uint8_t header[] = "{\"status\":343}";
+	ms::PropertyExchangeMessageFields f{};
+	f.Type = static_cast<T>(static_cast<uint8_t>(m.Type) + 1);
+	f.SourceMuid = my_muid;
+	f.DestinationMuid = m.SourceMuid;
+	f.RequestId = m.PropertyExchange.RequestId;
+	f.Header = header;
+	f.HeaderByteCount = sizeof(header) - 1;
+	f.ChunkCount = f.ChunkNumber = 1;
+	uint16_t capacity = 0;
+	uint8_t *buf = midici_reply_buffer(&capacity);
+	const size_t n = ms::BuildPropertyExchangeMessage(f, buf, capacity);
+	if (n)
+		midici_send_sysex(kGroup, buf, static_cast<uint16_t>(n));
+}
+
+void expire_set()
+{
+	if (set_rx.active && static_cast<uint32_t>(midici_initiator_now_ms() - set_rx.last_chunk_ms) >= 3000u)
+		set_rx.active = false;
 }
 
 } // namespace
@@ -534,13 +581,18 @@ void forget_initiator(uint32_t muid)
 void handle(const ms::ParsedMessage &m, const uint8_t *payload, size_t len, uint32_t my_muid, const char *piid)
 {
 	(void)len;
-	(void)my_muid;
 	check_reset();
+	expire_set();
 	const T type = m.Type;
 	const bool inquiry = type == T::PropertyGetDataInquiry || type == T::PropertySetDataInquiry ||
 	                     type == T::PropertySubscriptionInquiry;
-	if (inquiry)
-		requeue_interrupted_notify();
+	const auto &pe = m.PropertyExchange;
+	const bool continuation = type == T::PropertySetDataInquiry && pe.ChunkNumber != 1 &&
+	                          set_rx.source == m.SourceMuid && set_rx.request_id == pe.RequestId;
+	if (inquiry && (out.active || (set_rx.active && !continuation))) {
+		reply_busy(m, my_muid);
+		return;
+	}
 	switch (type) {
 	case T::PropertyGetDataInquiry:
 		on_get(m, payload, piid);
@@ -560,9 +612,21 @@ void handle(const ms::ParsedMessage &m, const uint8_t *payload, size_t len, uint
 	}
 }
 
+void terminate(uint32_t source, uint8_t original_type, uint8_t request_id)
+{
+	check_reset();
+	if (out.active && out.destination == source && out.request_id == request_id &&
+	    out.type == static_cast<uint8_t>(original_type + 1))
+		out.active = false;
+	if (set_rx.active && original_type == static_cast<uint8_t>(T::PropertySetDataInquiry) &&
+	    set_rx.source == source && set_rx.request_id == request_id)
+		set_rx.active = false;
+}
+
 void poll(uint32_t my_muid, const char *piid)
 {
 	check_reset();
+	expire_set();
 	if (settings_get) {
 		const struct settings &now = *settings_get();
 		if (have_last_seen) {
@@ -573,7 +637,7 @@ void poll(uint32_t my_muid, const char *piid)
 		last_seen = now;
 		have_last_seen = true;
 	}
-	if (!out.active && notify_pending && settings_get) {
+	if (!out.active && !set_rx.active && notify_pending && settings_get) {
 		for (int i = 0; i < kSubCount; i++) {
 			const uint8_t r = kSubscribable[i];
 			if (!(notify_pending & CI_PE_BIT(r)))
