@@ -657,6 +657,138 @@ static void test_channel_mode_max_and_zero(void)
     CHECK(spacing_ok('C', USBSTANDALONE));
 }
 
+/* press on a given channel */
+static void press_ch(uint8_t pad, int16_t pitch, uint8_t ch, uint8_t din, uint32_t t)
+{
+    int n = io_n;
+
+    ADC_Max[pad_to_adcmax_slot(pad)] = 679;
+    pe_press(pad, pitch, ch, din, t);
+    stamp(n, t);
+}
+
+/* last entry of this kind, port and channel, or -1 */
+static int last_on(char kind, uint8_t port, uint8_t ch)
+{
+    int i;
+
+    for (i = io_n - 1; i >= 0; i--)
+        if (io_log[i].kind == kind && io_log[i].port == port && io_log[i].ch == ch)
+            return i;
+    return -1;
+}
+
+/* spacing_ok for one channel: the rate cap is per channel */
+static int spacing_ok_ch(char kind, uint8_t port, uint8_t ch)
+{
+    int i, prev = -1;
+
+    for (i = 0; i < io_n; i++) {
+        if (io_log[i].kind != kind || io_log[i].port != port || io_log[i].ch != ch)
+            continue;
+        if (prev >= 0 && (uint32_t)(ev_t[i] - ev_t[prev]) < PRESSURE_MIN_INTERVAL_MS)
+            return 0;
+        prev = i;
+    }
+    return 1;
+}
+
+/* split surface: one pitch on two channels is two notes, each with its own
+ * Note On/Off and its own poly pressure */
+static void test_same_pitch_two_channels_two_notes(void)
+{
+    uint32_t t;
+    int a, b;
+
+    setup(PRESS_POLY, 1);
+    set_raw(44, 2500);
+    set_raw(51, 3000);
+    press_ch(44, 81, 0, 0, 0);
+    press_ch(51, 81, 1, 0, 0);
+    CHECK_EQ(count_kind('N', 0), 2);
+    CHECK_EQ(io_log[0].ch, 0);
+    CHECK_EQ(io_log[1].ch, 1);
+    for (t = 1; t <= 20; t++)
+        poll(t);
+    a = last_on('P', USBSTANDALONE, 0);
+    b = last_on('P', USBSTANDALONE, 1);
+    CHECK(a >= 0 && b >= 0);
+    if (a >= 0 && b >= 0) {
+        CHECK_EQ(io_log[a].v, pad_pressure32(pad_pressure12(2500, THRESH_MED)));
+        CHECK_EQ(io_log[b].v, pad_pressure32(pad_pressure12(3000, THRESH_MED)));
+    }
+    release(44, 21);
+    CHECK_EQ(io_log[io_n - 1].kind, 'F');
+    CHECK_EQ(io_log[io_n - 1].ch, 0);
+    release(51, 22);
+    CHECK_EQ(io_log[io_n - 1].kind, 'F');
+    CHECK_EQ(io_log[io_n - 1].ch, 1);
+    CHECK_EQ(count_kind('F', 0), 2);
+    CHECK_EQ(pe_notes_active(), 0);
+}
+
+/* channel pressure is per channel: each channel gets the max of its own
+ * pads, and goes to 0 when its own last pad lets go */
+static void test_channel_pressure_per_channel(void)
+{
+    uint32_t t;
+    int a, b, n;
+
+    setup(PRESS_CHANNEL, 1);
+    set_raw(11, 2500);
+    set_raw(12, 3000);
+    set_raw(53, 2700);
+    press_ch(11, 60, 0, 0, 0);
+    press_ch(12, 62, 0, 0, 0);
+    press_ch(53, 84, 3, 0, 0);
+    for (t = 1; t <= 20; t++)
+        poll(t);
+    a = last_on('C', USBSTANDALONE, 0);
+    b = last_on('C', USBSTANDALONE, 3);
+    CHECK(a >= 0 && b >= 0);
+    if (a >= 0 && b >= 0) {
+        CHECK_EQ(io_log[a].v, pad_pressure32(pad_pressure12(3000, THRESH_MED)));
+        CHECK_EQ(io_log[b].v, pad_pressure32(pad_pressure12(2700, THRESH_MED)));
+    }
+    /* channel 3's only pad lets go: its 0 at once, channel 0 carries on */
+    release(53, 21);
+    CHECK_EQ(io_log[io_n - 1].kind, 'C');
+    CHECK_EQ(io_log[io_n - 1].ch, 3);
+    CHECK_EQ(io_log[io_n - 1].v, 0);
+    set_raw(12, 3200);
+    n = io_n;
+    for (t = 22; t <= 40; t++)
+        poll(t);
+    CHECK(count_kind('C', n) >= 1);
+    CHECK_EQ(last_on('C', USBSTANDALONE, 3), n - 1);  /* nothing more on 3 */
+    CHECK(spacing_ok_ch('C', USBSTANDALONE, 0));
+    CHECK(spacing_ok_ch('C', USBSTANDALONE, 3));
+    /* release all: a 0 on channel 0 only (3 is at 0 already) */
+    n = io_n;
+    pe_release_all();
+    CHECK_EQ(count_kind('C', n), 1);
+    CHECK_EQ(io_log[io_n - 1].ch, 0);
+    CHECK_EQ(io_log[io_n - 1].v, 0);
+}
+
+/* the transport forgets both notes; DIN gets each its own Note Off */
+static void test_forget_all_two_channels_din(void)
+{
+    int n;
+
+    setup(PRESS_POLY, 1);
+    press_ch(44, 81, 0, 1, 0);
+    press_ch(51, 81, 1, 1, 0);
+    press_ch(18, 72, 0, 1, 0);
+    press_ch(25, 72, 0, 1, 0);   /* shares channel 0's 72 */
+    n = io_n;
+    pe_forget_all();
+    CHECK_EQ(count_kind('F', n), 3);
+    CHECK(last_on('F', DINMIDI, 1) >= n);
+    CHECK_EQ(last_on('F', USBSTANDALONE, 0), -1);
+    CHECK_EQ(pe_notes_active(), 0);
+}
+
 static void test_channel_zero_on_release_all(void)
 {
     uint32_t t;
@@ -841,4 +973,7 @@ void test_pressure_all(void)
     RUN(test_no_pressure_while_capturing);
     RUN(test_release_stops_pressure);
     RUN(test_instant_pressure_from_first_contact);
+    RUN(test_same_pitch_two_channels_two_notes);
+    RUN(test_channel_pressure_per_channel);
+    RUN(test_forget_all_two_channels_din);
 }

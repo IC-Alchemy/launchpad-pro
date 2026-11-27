@@ -22,12 +22,14 @@ enum ci_pe_resource {
 	CI_PE_PLAY_OPTIONS,	/* "X-PlayOptions": Get / Set / Subscribe */
 	CI_PE_SCALE_LIST,	/* "X-ScaleList": the scale names, read-only */
 	CI_PE_TUNING_LIST,	/* "X-TuningList": tuning ids, names and scales, read-only */
+	CI_PE_SURFACE_SETTINGS,	/* "X-SurfaceSettings": palettes and split, Get / Set / Subscribe */
 	CI_PE_RESOURCE_COUNT,
 	CI_PE_NONE = 0xFF
 };
 
 /* Bit per resource, for what a settings change touches. */
 #define CI_PE_BIT(r) ((uint8_t)(1u << (r)))
+typedef char ci_pe_resources_fit_mask[(CI_PE_RESOURCE_COUNT <= 8) ? 1 : -1];
 
 /* Largest Set body accepted; a longer one gets status 413. */
 #define CI_PE_SET_BODY_MAX 256

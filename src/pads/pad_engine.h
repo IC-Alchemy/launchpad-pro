@@ -5,8 +5,9 @@
 
 /* Pad engine: turns grid pad presses and releases into notes on the
  * instrument's output seam (instrument/io.h). It owns per-pad state, the
- * three velocity modes, note sharing between pads of the same pitch and
- * pressure. Runs only from the main loop: not reentrant. */
+ * three velocity modes, note sharing between pads of the same pitch on the
+ * same channel, and pressure. A pitch on two channels (the split surface)
+ * is two notes. Runs only from the main loop: not reentrant. */
 
 #define PEAK_WINDOW_MS 3        /* >= 2 ms after the press at 1 ms tick resolution */
 
@@ -20,9 +21,10 @@
 #define PRESSURE_HYST7 16
 #define PRESSURE_MIN_INTERVAL_MS 5
 
-/* Called when a pitch starts (sounding = 1) or stops (0) sounding: on the
- * same 0 -> 1 and 1 -> 0 edges that send the Note On and Note Off. */
-typedef void (*pe_sounding_fn)(uint8_t pitch, uint8_t sounding);
+/* Called when a note (a pitch on channel ch) starts (sounding = 1) or stops
+ * (0) sounding: on the same 0 -> 1 and 1 -> 0 edges that send the Note On
+ * and Note Off. */
+typedef void (*pe_sounding_fn)(uint8_t pitch, uint8_t ch, uint8_t sounding);
 
 /* Two-stage mode: the engine (pads/twostage.h) decides when a pad starts and
  * stops and how hard; this callback supplies what to play. Called at the
@@ -71,7 +73,7 @@ void pe_release(uint8_t pad, uint32_t now);
  * the raw buffer) and pressure; call every main loop pass. Pressure runs on
  * the first poll with a new now (so once per ms): each HELD pad's raw
  * sample is filtered, then poly pressure (max over the pads sharing a
- * pitch) or channel pressure (max over all held pads) is sent to
+ * note) or channel pressure (max over the held pads on each channel) is sent to
  * Standalone and, for pads latched with the DIN flag, DINMIDI. Capturing
  * pads send none. */
 void pe_poll(uint32_t now);
@@ -87,10 +89,10 @@ void pe_release_all(void);
 /* The USB transport changed (alternate setting or protocol) and has ended
  * every Standalone note itself: forget every note without sending anything
  * on USB. Every pad goes idle (pads still held are ignored until their
- * release), the pitch counts and channel pressure start from 0, and the
+ * release), the per-channel counts and channel pressure start from 0, and the
  * sounding callback is not called. DIN never sees the change, so each DIN
- * note gets its Note Off (once per pitch) and DIN channel pressure goes back
- * to 0 if it isn't. */
+ * note gets its Note Off (once per note) and DIN channel pressure goes back
+ * to 0 on each channel where it isn't. */
 void pe_forget_all(void);
 
 /* Any pad capturing or sounding. */

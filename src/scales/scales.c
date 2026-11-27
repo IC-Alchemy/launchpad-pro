@@ -152,8 +152,12 @@ enum role scale_pitch_role(const struct scale_ctx *c, int16_t pitch)
 	if (deg == 0)
 		return ROLE_ROOT;
 	/* the third and fifth steps; All Degrees and Chromatic have none */
-	if (s->n && s->n < 12 && (deg == step_degree(t, s, 2) || deg == step_degree(t, s, 4)))
-		return ROLE_HIGHLIGHT;
+	if (s->n > 4 && s->n < 12) {
+		if (deg == step_degree(t, s, 2))
+			return ROLE_THIRD;
+		if (deg == step_degree(t, s, 4))
+			return ROLE_FIFTH;
+	}
 	for (i = 0; i < n; i++)
 		if (deg == step_degree(t, s, i))
 			return ROLE_SCALE;

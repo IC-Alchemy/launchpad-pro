@@ -131,8 +131,8 @@ static void test_tuned_layouts(void)
 	CHECK_EQ(scale_pad_pitch(&c, 18), 84);   /* the octave: 24 degrees up */
 	CHECK_EQ(scale_pitch_role(&c, 60), ROLE_ROOT);
 	CHECK_EQ(scale_pitch_role(&c, 64), ROLE_SCALE);
-	CHECK_EQ(scale_pitch_role(&c, 67), ROLE_HIGHLIGHT);
-	CHECK_EQ(scale_pitch_role(&c, 74), ROLE_HIGHLIGHT);
+	CHECK_EQ(scale_pitch_role(&c, 67), ROLE_THIRD);
+	CHECK_EQ(scale_pitch_role(&c, 74), ROLE_FIFTH);
 	CHECK_EQ(scale_pitch_role(&c, 61), ROLE_OUT);
 	CHECK_EQ(scale_pitch_role(&c, 36), ROLE_ROOT);
 

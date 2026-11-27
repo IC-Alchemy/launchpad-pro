@@ -23,7 +23,7 @@ OBJECTS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(SOURCES) $(FW_S
 
 # host simulator: the app plus stand-ins for the hal and midi2 API
 SIM_SOURCES = $(TOOLS)/simulator.c $(TOOLS)/sim_midi2.c $(SOURCES) src/ump/ump_codec.c src/pads/pad_velocity.c \
-	src/scales/scales.c src/scales/tuning.c src/scales/tuning_data.c src/instrument/settings.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c src/pads/twostage.c
+	src/scales/scales.c src/scales/tuning.c src/scales/tuning_data.c src/instrument/settings.c src/instrument/palette.c src/instrument/ui.c src/instrument/io_hal.c src/pads/pad_engine.c src/pads/twostage.c
 
 ifeq ($(OS),Windows_NT)
   EXE = .exe
@@ -63,7 +63,7 @@ TEST_SOURCES += tests/test_scales.c tests/test_tuning.c src/scales/scales.c src/
 TEST_SOURCES += tests/test_settings.c src/instrument/settings.c tests/stubs/io_stub.c
 TEST_SOURCES += tests/test_pad_engine.c src/pads/pad_engine.c
 TEST_SOURCES += tests/test_pressure.c
-TEST_SOURCES += tests/test_ui.c src/instrument/ui.c
+TEST_SOURCES += tests/test_ui.c src/instrument/ui.c src/instrument/palette.c tests/test_palette.c
 TEST_SOURCES += tests/test_pads.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
 TEST_SOURCES += tests/test_midici.c src/midici/midici.c src/midici/ci_queue.c

@@ -2,9 +2,10 @@
 #include "instrument/io.h"
 #include "scales/scales.h"
 #include "scales/tuning.h"
+#include "instrument/palette.h"
 #include <string.h>
 
-#define FIELDS 15
+#define FIELDS 19
 
 static struct settings g_saved;
 static uint32_t g_touch;
@@ -26,6 +27,10 @@ void settings_defaults(struct settings *s)
 	s->pressure_smoothing = SMOOTH_LIGHT;
 	s->tuning = TUNING_DEFAULT_ID;
 	s->a4_tenths = A4_TENTHS_DEFAULT;
+	s->palette = PALETTE_OCEAN;
+	s->split = 0;
+	s->upper_palette = PALETTE_EMBER;
+	s->upper_channel = 1;
 }
 
 uint8_t settings_scale_for(uint8_t tuning, uint8_t scale)
@@ -46,7 +51,8 @@ uint8_t settings_valid(const struct settings *s)
 	       s->din_mirror <= 1 && s->velocity_mode < 4 &&
 	       s->velocity_curve < 3 && s->pressure_mode < 3 &&
 	       s->pressure_threshold < THRESH_COUNT && s->channel < 16 &&
-	       s->pressure_smoothing < 4;
+	       s->pressure_smoothing < 4 && s->palette < PALETTE_COUNT &&
+	       s->split <= 1 && s->upper_palette < PALETTE_COUNT && s->upper_channel < 16;
 }
 
 static void to_bytes(const struct settings *s, uint8_t *b)
@@ -66,6 +72,10 @@ static void to_bytes(const struct settings *s, uint8_t *b)
 	b[12] = s->tuning;
 	b[13] = (uint8_t)(s->a4_tenths & 0xFF);
 	b[14] = (uint8_t)(s->a4_tenths >> 8);
+	b[15] = s->palette;
+	b[16] = s->split;
+	b[17] = s->upper_palette;
+	b[18] = s->upper_channel;
 }
 
 void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
@@ -77,7 +87,7 @@ void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
 	out[1] = 'P';
 	out[2] = 'M';
 	out[3] = '2';
-	out[4] = 3;
+	out[4] = 4;
 	to_bytes(s, out + 5);
 	for (i = 0; i < SETTINGS_RECORD_LEN - 1; i++)
 		sum = (uint8_t)(sum + out[i]);
@@ -92,8 +102,10 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 
 	if (in[0] != 'L' || in[1] != 'P' || in[2] != 'M' || in[3] != '2')
 		return 0;
-	if (in[4] == 3)
+	if (in[4] == 4)
 		len = SETTINGS_RECORD_LEN;
+	else if (in[4] == 3)
+		len = SETTINGS_RECORD_V3_LEN;
 	else if (in[4] == 2)
 		len = SETTINGS_RECORD_V2_LEN;
 	else if (in[4] == 1)
@@ -117,9 +129,15 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 	t.din_mirror = in[14];
 	t.channel = in[15];
 	t.pressure_smoothing = len >= SETTINGS_RECORD_V2_LEN ? in[16] : SMOOTH_LIGHT;
-	if (len == SETTINGS_RECORD_LEN) {
+	if (len >= SETTINGS_RECORD_V3_LEN) {
 		t.tuning = in[17];
 		t.a4_tenths = (uint16_t)(in[18] | (in[19] << 8));
+	}
+	if (len == SETTINGS_RECORD_LEN) {
+		t.palette = in[20];
+		t.split = in[21];
+		t.upper_palette = in[22];
+		t.upper_channel = in[23];
 	}
 	if (!settings_valid(&t))
 		return 0;
