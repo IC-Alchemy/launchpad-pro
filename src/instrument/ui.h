@@ -10,8 +10,9 @@
  * the settings.
  *
  * Surface: the play page lights each pad by its role (scales/scales.h) in
- * the chosen palette (instrument/palette.h). With split on, rows 1..4 use
- * the palette and channel, rows 5..8 the upper palette and upper channel.
+ * the chosen palette (instrument/palette.h). The left round buttons set
+ * the split mode and primary palette. The upper palette and channel apply
+ * to rows 5..8 in X mode or columns 5..8 in Y mode.
  * Runs only from the main loop: not reentrant.
  *
  * The caller runs pe_init(adc_buffer, ui_on_sounding) before ui_init. */

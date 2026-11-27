@@ -339,15 +339,15 @@ static void test_pe_surface_settings(void)
 	CHECK(ci_pe_can_set(CI_PE_SURFACE_SETTINGS) && ci_pe_can_subscribe(CI_PE_SURFACE_SETTINGS));
 	settings_defaults(&s);
 	render(CI_PE_SURFACE_SETTINGS, &s, "", buf, sizeof buf);
-	CHECK(strcmp(buf, "{\"palette\":\"ocean\",\"split\":false,\"upperPalette\":\"ember\",\"upperChannel\":2}") == 0);
+	CHECK(strcmp(buf, "{\"palette\":\"ocean\",\"split\":false,\"splitMode\":\"off\",\"upperPalette\":\"contrast\",\"upperChannel\":2}") == 0);
 
-	/* every palette in both halves, every upper channel, split on and off */
+	/* Every palette in both halves, every upper channel, all split modes. */
 	for (uint8_t v = 0; v < 32; v++) {
 		settings_defaults(&s);
 		s.palette = (uint8_t)(v % PALETTE_COUNT);
 		s.upper_palette = (uint8_t)((v / 2) % PALETTE_COUNT);
 		s.upper_channel = (uint8_t)(v % 16);
-		s.split = (uint8_t)((v >> 4) & 1);
+		s.split_mode = (uint8_t)(v % SPLIT_COUNT);
 		CHECK(settings_valid(&s));
 		settings_defaults(&t);
 		render(CI_PE_SURFACE_SETTINGS, &s, "", buf, sizeof buf);
@@ -358,11 +358,17 @@ static void test_pe_surface_settings(void)
 	/* a Set changes only what it names */
 	settings_defaults(&s);
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"split\":true,\"upperChannel\":16}", &s), CI_PE_STATUS_OK);
-	CHECK_EQ(s.split, 1);
+	CHECK_EQ(s.split_mode, SPLIT_X);
 	CHECK_EQ(s.upper_channel, 15);
 	CHECK_EQ(s.palette, PALETTE_OCEAN);
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"palette\":\"contrast\"}", &s), CI_PE_STATUS_OK);
 	CHECK_EQ(s.palette, PALETTE_CONTRAST);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"splitMode\":\"y\",\"split\":false}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.split_mode, SPLIT_Y);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"split\":true}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.split_mode, SPLIT_Y);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"split\":false}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.split_mode, SPLIT_OFF);
 
 	/* one bad field rejects the whole Set */
 	before = s;
@@ -371,6 +377,11 @@ static void test_pe_surface_settings(void)
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"upperChannel\":17}", &s), CI_PE_STATUS_BAD_REQUEST);
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"upperPalette\":3}", &s), CI_PE_STATUS_BAD_REQUEST);
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"split\":1}", &s), CI_PE_STATUS_BAD_REQUEST);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"splitMode\":\"diagonal\"}", &s), CI_PE_STATUS_BAD_REQUEST);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"palette\":\"ember\"}", &s), CI_PE_STATUS_BAD_REQUEST);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"palette\":\"forest\"}", &s), CI_PE_STATUS_BAD_REQUEST);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"upperPalette\":\"rose\"}", &s), CI_PE_STATUS_BAD_REQUEST);
+	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"upperPalette\":\"amethyst\"}", &s), CI_PE_STATUS_BAD_REQUEST);
 	CHECK(same(&s, &before));
 	/* the other resources ignore the surface fields */
 	CHECK_EQ(apply(CI_PE_PLAY_OPTIONS, "{\"palette\":\"ember\"}", &s), CI_PE_STATUS_OK);
@@ -382,10 +393,15 @@ static void test_pe_surface_settings(void)
 	s.upper_channel = 6;
 	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
 	CHECK(strcmp(buf, "[{\"title\":\"Standalone Port\",\"channel\":3}]") == 0);
-	s.split = 1;
+	s.split_mode = SPLIT_X;
 	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
 	CHECK(strcmp(buf, "[{\"title\":\"Standalone Lower\",\"channel\":3},"
 	                  "{\"title\":\"Standalone Upper\",\"channel\":7}]") == 0);
+
+	s.split_mode = SPLIT_Y;
+	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
+	CHECK(strcmp(buf, "[{\"title\":\"Standalone Left\",\"channel\":3},"
+	                  "{\"title\":\"Standalone Right\",\"channel\":7}]") == 0);
 
 	/* the schema lists every palette by its name */
 	{
@@ -422,17 +438,17 @@ static void test_pe_changed(void)
 	/* surface: the palettes touch only X-SurfaceSettings; split and the
 	 * upper channel (while split) change the ChannelList too */
 	b = a;
-	b.palette = PALETTE_ROSE;
+	b.palette = PALETTE_CITRUS;
 	CHECK_EQ(ci_pe_changed(&a, &b), CI_PE_BIT(CI_PE_SURFACE_SETTINGS));
 	b = a;
-	b.upper_palette = PALETTE_ROSE;
+	b.upper_palette = PALETTE_CITRUS;
 	CHECK_EQ(ci_pe_changed(&a, &b), CI_PE_BIT(CI_PE_SURFACE_SETTINGS));
 	b = a;
 	b.upper_channel = 7;
 	CHECK_EQ(ci_pe_changed(&a, &b), CI_PE_BIT(CI_PE_SURFACE_SETTINGS));
-	b.split = 1;
+	b.split_mode = SPLIT_X;
 	CHECK_EQ(ci_pe_changed(&a, &b), CI_PE_BIT(CI_PE_SURFACE_SETTINGS) | CI_PE_BIT(CI_PE_CHANNEL_LIST));
-	a.split = 1;
+	a.split_mode = SPLIT_X;
 	CHECK_EQ(ci_pe_changed(&a, &b), CI_PE_BIT(CI_PE_SURFACE_SETTINGS) | CI_PE_BIT(CI_PE_CHANNEL_LIST));
 }
 

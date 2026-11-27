@@ -13,7 +13,7 @@ typedef char ci_pe_scale_count_is_61[(SCALE_COUNT == 61) ? 1 : -1] __attribute__
 typedef char ci_pe_thresh_count_is_4[(THRESH_COUNT == 4) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_a4_range[(A4_TENTHS_MIN == 4150 && A4_TENTHS_MAX == 4660) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
-typedef char ci_pe_palette_count_is_8[(PALETTE_COUNT == 8) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_palette_count_is_4[(PALETTE_COUNT == 4) ? 1 : -1] __attribute__((unused));
 
 static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
 	"ResourceList", "DeviceInfo", "ChannelList", "X-ScaleSettings", "X-PlayOptions", "X-ScaleList",
@@ -56,12 +56,12 @@ static const char RESOURCE_LIST[] =
 	"\"scales\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}}}},"
 	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Surface\",\"type\":\"object\",\"properties\":{"
-	"\"palette\":{\"title\":\"Palette (lower half when split)\",\"type\":\"string\",\"enum\":["
-	"\"ocean\",\"ember\",\"forest\",\"amethyst\",\"citrus\",\"glacier\",\"rose\",\"contrast\"]},"
-	"\"split\":{\"title\":\"Split (rows 5-8 on their own palette and channel)\",\"type\":\"boolean\"},"
-	"\"upperPalette\":{\"title\":\"Upper palette\",\"type\":\"string\",\"enum\":["
-	"\"ocean\",\"ember\",\"forest\",\"amethyst\",\"citrus\",\"glacier\",\"rose\",\"contrast\"]},"
-	"\"upperChannel\":{\"title\":\"Upper MIDI channel\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}}]";
+	"\"palette\":{\"title\":\"Palette (whole grid, lower or left)\",\"type\":\"string\",\"enum\":["
+	"\"ocean\",\"citrus\",\"glacier\",\"contrast\"]},"
+	"\"splitMode\":{\"title\":\"Split mode\",\"type\":\"string\",\"enum\":[\"off\",\"x\",\"y\"]},"
+	"\"upperPalette\":{\"title\":\"Second palette (upper or right)\",\"type\":\"string\",\"enum\":["
+	"\"ocean\",\"citrus\",\"glacier\",\"contrast\"]},"
+	"\"upperChannel\":{\"title\":\"Second MIDI channel (upper or right)\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}}]";
 
 /* Strings for the enum fields, indexed by the settings value. */
 static const char *const LAYOUTS[LAYOUT_COUNT] = {
@@ -72,6 +72,9 @@ static const char *const CURVES[3] = {"soft", "linear", "hard"};
 static const char *const PRESSURES[3] = {"poly", "channel", "off"};
 static const char *const THRESHOLDS[THRESH_COUNT] = {"low", "med", "high", "instant"};
 static const char *const SMOOTHINGS[4] = {"none", "light", "medium", "heavy"};
+static const char *const SPLIT_MODES[SPLIT_COUNT] = {
+	[SPLIT_OFF] = "off", [SPLIT_X] = "x", [SPLIT_Y] = "y",
+};
 
 uint8_t ci_pe_lookup(const char *name, uint16_t len)
 {
@@ -193,7 +196,8 @@ static void render_settings(uint8_t res, const struct settings *s, struct ci_jso
 		member_int(o, "a4Tenths", s->a4_tenths, 1);
 	} else if (res == CI_PE_SURFACE_SETTINGS) {
 		member_str(o, "palette", palette_name(s->palette), 0);
-		member_bool(o, "split", s->split);
+		member_bool(o, "split", s->split_mode != SPLIT_OFF);
+		member_str(o, "splitMode", s->split_mode < SPLIT_COUNT ? SPLIT_MODES[s->split_mode] : "", 1);
 		member_str(o, "upperPalette", palette_name(s->upper_palette), 1);
 		member_int(o, "upperChannel", s->upper_channel + 1, 1);
 	} else {
@@ -253,13 +257,13 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 		device_info(o, piid);
 		break;
 	case CI_PE_CHANNEL_LIST:
-		/* split: one entry per half, lower first */
 		ci_json_raw(o, "[{");
-		member_str(o, "title", s->split ? "Standalone Lower" : "Standalone Port", 0);
+		member_str(o, "title", s->split_mode == SPLIT_Y ? "Standalone Left" :
+		           s->split_mode == SPLIT_X ? "Standalone Lower" : "Standalone Port", 0);
 		member_int(o, "channel", s->channel + 1, 1);
-		if (s->split) {
+		if (s->split_mode != SPLIT_OFF) {
 			ci_json_raw(o, "},{");
-			member_str(o, "title", "Standalone Upper", 0);
+			member_str(o, "title", s->split_mode == SPLIT_Y ? "Standalone Right" : "Standalone Upper", 0);
 			member_int(o, "channel", s->upper_channel + 1, 1);
 		}
 		ci_json_raw(o, "}]");
@@ -361,6 +365,8 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 	struct ci_json_it it;
 	struct ci_json_member m;
 	uint8_t scale_given = 0;
+	uint8_t split_enabled = t.split_mode != SPLIT_OFF;
+	uint8_t split_mode = SPLIT_COUNT;
 	int r;
 
 	if (!ci_pe_can_set(res))
@@ -387,7 +393,9 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 			if (ci_json_key_is(&m, "palette"))
 				ok = set_palette(&m, &t.palette);
 			else if (ci_json_key_is(&m, "split"))
-				ok = set_bool(&m, &t.split);
+				ok = set_bool(&m, &split_enabled);
+			else if (ci_json_key_is(&m, "splitMode"))
+				ok = set_enum(&m, SPLIT_MODES, SPLIT_COUNT, &split_mode);
 			else if (ci_json_key_is(&m, "upperPalette"))
 				ok = set_palette(&m, &t.upper_palette);
 			else if (ci_json_key_is(&m, "upperChannel"))
@@ -411,6 +419,14 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 		if (!ok)
 			return CI_PE_STATUS_BAD_REQUEST;
 	}
+	/* An explicit mode takes precedence over the legacy on/off control. */
+	if (split_mode < SPLIT_COUNT)
+		t.split_mode = split_mode;
+	else if (!split_enabled)
+		t.split_mode = SPLIT_OFF;
+	else if (t.split_mode == SPLIT_OFF)
+		t.split_mode = SPLIT_X;
+
 	/* a new tuning without a scale keeps the scale if it can, else takes
 	 * the tuning's default; a scale given that the tuning doesn't offer is
 	 * an error (settings_valid) */
@@ -435,11 +451,11 @@ uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
 	    a->pressure_smoothing != b->pressure_smoothing || a->din_mirror != b->din_mirror ||
 	    a->channel != b->channel)
 		bits |= CI_PE_BIT(CI_PE_PLAY_OPTIONS);
-	if (a->palette != b->palette || a->split != b->split ||
+	if (a->palette != b->palette || a->split_mode != b->split_mode ||
 	    a->upper_palette != b->upper_palette || a->upper_channel != b->upper_channel)
 		bits |= CI_PE_BIT(CI_PE_SURFACE_SETTINGS);
-	if (a->channel != b->channel || a->split != b->split ||
-	    (a->split && a->upper_channel != b->upper_channel))
+	if (a->channel != b->channel || a->split_mode != b->split_mode ||
+	    (a->split_mode != SPLIT_OFF && a->upper_channel != b->upper_channel))
 		bits |= CI_PE_BIT(CI_PE_CHANNEL_LIST);
 	return bits;
 }
