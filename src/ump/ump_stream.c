@@ -28,11 +28,18 @@ static const uint16_t FB_WORD0[FB_COUNT] = {0x8033, 0x813B};
 static const uint32_t FB_WORD1[FB_COUNT] = {0x00010000u | (MIDI_CI_VERSION << 8), 0x01010000u};
 
 static uint8_t g_protocol = UMP_PROTO_MIDI2;
+static uint8_t g_stream_seen;
 static void (*g_hook)(uint8_t old_proto);
 
 void ump_stream_reset(void)
 {
 	g_protocol = UMP_PROTO_MIDI2;
+	g_stream_seen = 0;
+}
+
+uint8_t ump_stream_negotiated(void)
+{
+	return (uint8_t)((g_stream_seen & 0x03u) == 0x03u);
 }
 
 uint8_t ump_stream_protocol(void)
@@ -154,9 +161,11 @@ int ump_stream_handle(const uint32_t msg[4])
 		return 0;
 	switch ((msg[0] >> 16) & 0x3FF) {
 	case ST_EP_DISCOVERY:
+		g_stream_seen |= 0x01u;
 		endpoint_discovery(msg);
 		break;
 	case ST_FB_DISCOVERY:
+		g_stream_seen |= 0x02u;
 		fb_discovery(msg);
 		break;
 	case ST_CONFIG_REQUEST: {

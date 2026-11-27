@@ -21,6 +21,9 @@ u8 midi2_active(void);
 /* The current USB MIDIStreaming alternate setting: 0 (USB MIDI 1.0) or 1 (UMP). */
 u8 midi2_usb_alt(void);
 
+/* 1 when USB is configured in alt 1 and UMP Stream negotiation has completed. */
+u8 midi2_ump_negotiated(void);
+
 /* High-resolution sends. Where the destination is MIDI 1.0 (DINMIDI, USB alt 0,
  * USBMIDI, or the Standalone group in MIDI 1.0 Protocol) the value is reduced
  * to 7 bits (velocity: top 7 of 16 bits, Note On at least 1; pressure: top 7

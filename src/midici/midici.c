@@ -12,14 +12,18 @@ CI_QUEUE_DEFINE(ci_tx, CI_TX_QUEUE_PACKETS);	/* CiTxQueue: main loop -> USB TX p
  * change and discards its own state. Only written under irq_save. */
 static volatile uint16_t epoch;
 
-/* Owned exclusively by midici_poll. */
+/* Owned exclusively by midici_poll (and midici_init under irq_save). */
 static uint16_t seen_epoch;
-static uint8_t ci_buf[CI_REASSEMBLY_BYTES];	/* payload from the 0x7E, no F0/F7 */
-static uint16_t ci_len;
-static uint8_t ci_active;
-static uint8_t ci_group;
-/* Non-MIDI-CI SysEx (the app's own): one reassembler per standalone/MIDI group. */
-static struct ump_sysex7_rx other[2];
+
+#define SLOT_GROUP_FREE 0xFFu
+struct sysex_rx_slot {
+	uint8_t buf[CI_REASSEMBLY_BYTES + 2]; /* [0]=0xF0 reserve, [1..len]=payload, [len+1]=0xF7 reserve */
+	uint16_t len;                         /* 0..CI_REASSEMBLY_BYTES */
+	uint8_t group;                        /* 0..15, or SLOT_GROUP_FREE */
+	uint8_t lru;                          /* 0 = LRU .. (CI_REASSEMBLY_SLOTS - 1) = MRU */
+};
+static struct sysex_rx_slot rx_slots[CI_REASSEMBLY_SLOTS];
+static uint8_t rx_slots_ready;
 
 static uint8_t reply_buf[CI_REPLY_BYTES];
 
@@ -112,114 +116,212 @@ uint32_t midici_muid(void)
 
 /* ---- RX reassembly ---- */
 
-static void ci_abort(void)
-{
-	if (ci_active)
-		drops++;
-	ci_active = 0;
-	ci_len = 0;
-}
-
-static void other_complete(uint8_t group, struct ump_sysex7_rx *rx)
-{
-	app_sysex_event(group, rx->buf, rx->len);
-	ump_sysex7_rx_reset(rx);
-}
-
-static void feed_other(uint8_t group, const uint32_t pkt[2])
-{
-	if (group > 1)
-		return;
-	if (ump_sysex7_rx_feed(&other[group], pkt) == 1)
-		other_complete(group, &other[group]);
-}
-
-static void feed_ci(uint8_t group, uint8_t st, uint8_t cnt, const uint8_t b[6])
+static void rx_reset_slots(void)
 {
 	uint8_t i;
 
-	if (st == 0 || st == 1) {
-		ci_active = 1;
-		ci_group = group;
-		ci_len = 0;
+	for (i = 0; i < CI_REASSEMBLY_SLOTS; i++) {
+		rx_slots[i].group = SLOT_GROUP_FREE;
+		rx_slots[i].len = 0;
+		rx_slots[i].lru = i;
 	}
-	if ((uint16_t)(ci_len + cnt) > CI_REASSEMBLY_BYTES) {
-		ci_abort();
-		return;
+	rx_slots_ready = 1;
+}
+
+static struct sysex_rx_slot *slot_find(uint8_t group)
+{
+	uint8_t i;
+
+	for (i = 0; i < CI_REASSEMBLY_SLOTS; i++) {
+		if (rx_slots[i].group == group)
+			return &rx_slots[i];
 	}
-	for (i = 0; i < cnt; i++)
-		ci_buf[ci_len++] = b[i] & 0x7F;
-	if (st == 0 || st == 3) {
-		uint16_t n = ci_len;
-		ci_active = 0;
-		ci_len = 0;
+	return 0;
+}
+
+static void slot_touch(struct sysex_rx_slot *s)
+{
+	uint8_t old = s->lru;
+	uint8_t i;
+
+	for (i = 0; i < CI_REASSEMBLY_SLOTS; i++) {
+		if (rx_slots[i].lru > old)
+			rx_slots[i].lru--;
+	}
+	s->lru = CI_REASSEMBLY_SLOTS - 1u;
+}
+
+static void slot_free(struct sysex_rx_slot *s)
+{
+	uint8_t old = s->lru;
+	uint8_t i;
+
+	s->group = SLOT_GROUP_FREE;
+	s->len = 0;
+	for (i = 0; i < CI_REASSEMBLY_SLOTS; i++) {
+		if (rx_slots[i].lru < old)
+			rx_slots[i].lru++;
+	}
+	s->lru = 0;
+}
+
+static struct sysex_rx_slot *slot_alloc(uint8_t group, uint8_t *evicted)
+{
+	struct sysex_rx_slot *victim = &rx_slots[0];
+	uint8_t i;
+
+	for (i = 0; i < CI_REASSEMBLY_SLOTS; i++) {
+		if (rx_slots[i].group == SLOT_GROUP_FREE) {
+			*evicted = 0;
+			rx_slots[i].group = group;
+			rx_slots[i].len = 0;
+			slot_touch(&rx_slots[i]);
+			return &rx_slots[i];
+		}
+		if (rx_slots[i].lru < victim->lru)
+			victim = &rx_slots[i];
+	}
+	*evicted = 1;
+	victim->group = group;
+	victim->len = 0;
+	slot_touch(victim);
+	return victim;
+}
+
+static void rx_dispatch(uint8_t group, uint8_t *buf, uint16_t len)
+{
+	if (len >= 3u && buf[1] == 0x7Eu && buf[3] == 0x0Du) {
 		received++;
 		if (handler)
-			handler(group, ci_buf, n);
+			handler(group, &buf[1], len);
+	} else if (group <= 1u) {
+		buf[0] = 0xF0u;
+		buf[1u + len] = 0xF7u;
+		app_sysex_event(group, buf, (uint16_t)(len + 2u));
 	}
 }
 
 static void feed(const uint32_t pkt[2])
 {
 	uint32_t w0 = pkt[0], w1 = pkt[1];
-	uint8_t group = (uint8_t)((w0 >> 24) & 0xF);
-	uint8_t st = (uint8_t)((w0 >> 20) & 0xF);
-	uint8_t cnt = (uint8_t)((w0 >> 16) & 0xF);
+	uint8_t mt = (uint8_t)(w0 >> 28);
+	uint8_t group = (uint8_t)((w0 >> 24) & 0xFu);
+	uint8_t st = (uint8_t)((w0 >> 20) & 0xFu);
+	uint8_t cnt = (uint8_t)((w0 >> 16) & 0xFu);
+	struct sysex_rx_slot *s;
 	uint8_t b[6];
+	uint8_t i;
 
-	if ((w0 >> 28) != 3 || cnt > 6 || st > 3) {
-		if (ci_active && ci_group == group)
-			ci_abort();
-		if (group < 2)
-			ump_sysex7_rx_reset(&other[group]);
+	if (mt != 3u || st > 3u || cnt > 6u) {
+		drops++;
+		s = slot_find(group);
+		if (s)
+			slot_free(s);
 		return;
 	}
-	b[0] = (uint8_t)(w0 >> 8);
-	b[1] = (uint8_t)w0;
-	b[2] = (uint8_t)(w1 >> 24);
-	b[3] = (uint8_t)(w1 >> 16);
-	b[4] = (uint8_t)(w1 >> 8);
-	b[5] = (uint8_t)w1;
 
-	if (st == 0 || st == 1) {
-		/* the 0x7E 0x?? 0x0D universal-SysEx header tells MIDI-CI apart */
-		if (cnt >= 3 && (b[0] & 0x7F) == 0x7E && (b[2] & 0x7F) == 0x0D) {
-			if (ci_active)
-				ci_abort();	/* one reassembly buffer: older stream lost */
-			if (group < 2)
-				ump_sysex7_rx_reset(&other[group]);
-			feed_ci(group, st, cnt, b);
-		} else {
-			if (ci_active && ci_group == group)
-				ci_abort();
-			feed_other(group, pkt);
+	b[0] = (uint8_t)((w0 >> 8) & 0x7Fu);
+	b[1] = (uint8_t)(w0 & 0x7Fu);
+	b[2] = (uint8_t)((w1 >> 24) & 0x7Fu);
+	b[3] = (uint8_t)((w1 >> 16) & 0x7Fu);
+	b[4] = (uint8_t)((w1 >> 8) & 0x7Fu);
+	b[5] = (uint8_t)(w1 & 0x7Fu);
+
+	if (st == 0u) {
+		uint8_t tmp[8];
+
+		s = slot_find(group);
+		if (s) {
+			drops++;
+			slot_free(s);
 		}
+		for (i = 0; i < cnt; i++)
+			tmp[1u + i] = b[i];
+		rx_dispatch(group, tmp, cnt);
 		return;
 	}
-	if (ci_active && ci_group == group)
-		feed_ci(group, st, cnt, b);
-	else
-		feed_other(group, pkt);
+
+	if (st == 1u) {
+		s = slot_find(group);
+		if (s) {
+			drops++;
+			s->len = 0;
+			slot_touch(s);
+		} else {
+			uint8_t evicted = 0;
+			s = slot_alloc(group, &evicted);
+			if (evicted)
+				drops++;
+		}
+		for (i = 0; i < cnt; i++)
+			s->buf[1u + i] = b[i];
+		s->len = cnt;
+		return;
+	}
+
+	/* st == 2 (kContinue) or st == 3 (kEnd) */
+	s = slot_find(group);
+	if (!s) {
+		drops++;
+		return;
+	}
+	if ((uint32_t)s->len + cnt > CI_REASSEMBLY_BYTES) {
+		drops++;
+		slot_free(s);
+		return;
+	}
+	for (i = 0; i < cnt; i++)
+		s->buf[1u + s->len++] = b[i];
+	if (st == 2u) {
+		slot_touch(s);
+		return;
+	}
+	rx_dispatch(group, s->buf, s->len);
+	slot_free(s);
+}
+
+void midici_init(void)
+{
+	uint32_t s = irq_save();
+	ci_rx.head = 0;
+	ci_rx.tail = 0;
+	ci_rx.overflows = 0;
+	ci_tx.head = 0;
+	ci_tx.tail = 0;
+	ci_tx.overflows = 0;
+	epoch = 0;
+	seen_epoch = 0;
+	received = 0;
+	drops = 0;
+	muid = 0;
+	muid_ready = 0;
+	rx_reset_slots();
+	irq_restore(s);
 }
 
 void midici_poll(void)
 {
-	uint32_t pkt[2];
-	uint32_t s;
-	uint16_t ep;
-
 	for (;;) {
+		uint32_t pkt[2];
+		uint32_t s;
+		uint16_t ep;
+		int got = 0;
+
 		s = irq_save();
 		ep = epoch;
-		irq_restore(s);
-		if (ep != seen_epoch) {
-			seen_epoch = ep;
-			ci_active = 0;
-			ci_len = 0;
-			ump_sysex7_rx_reset(&other[0]);
-			ump_sysex7_rx_reset(&other[1]);
+		if (ci_rx.head != ci_rx.tail) {
+			uint16_t idx = (uint16_t)(ci_rx.head & (ci_rx.packets - 1u));
+			pkt[0] = ci_rx.words[2u * idx];
+			pkt[1] = ci_rx.words[2u * idx + 1u];
+			ci_rx.head++;
+			got = 1;
 		}
-		if (ci_queue_pop(&ci_rx, pkt) != 0)
+		irq_restore(s);
+		if (!rx_slots_ready || ep != seen_epoch) {
+			seen_epoch = ep;
+			rx_reset_slots();
+		}
+		if (!got)
 			return;
 		feed(pkt);
 	}
@@ -227,18 +329,34 @@ void midici_poll(void)
 
 /* ---- TX ---- */
 
+uint16_t midici_packetize_sysex7(uint8_t group, const uint8_t *payload, uint16_t len,
+                                 uint32_t (*out)[2], uint16_t max_packets)
+{
+	uint32_t packets32 = len ? (((uint32_t)len + 5u) / 6u) : 1u;
+	uint16_t packets, p;
+
+	if (!out || (len > 0 && !payload) || packets32 > max_packets)
+		return 0;
+	packets = (uint16_t)packets32;
+	for (p = 0; p < packets; p++)
+		ump_sysex7_packet(out[p], group, payload, len, p, packets);
+	return packets;
+}
+
 int midici_send_sysex(uint8_t group, const uint8_t *data, uint16_t len)
 {
 	uint16_t packets, p;
 	uint32_t pkt[2];
 
+	if (len > 0 && !data)
+		return -1;
 	if (len && data[0] == 0xF0) {
 		data++;
 		len--;
 	}
 	if (len && data[len - 1] == 0xF7)
 		len--;
-	packets = len ? (uint16_t)((len + 5) / 6) : 1;
+	packets = len ? (uint16_t)(((uint32_t)len + 5u) / 6u) : 1u;
 	if (ci_queue_free(&ci_tx) < packets) {
 		uint32_t s = irq_save();
 		ci_tx.overflows++;

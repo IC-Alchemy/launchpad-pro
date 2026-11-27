@@ -38,6 +38,7 @@
 #include "app.h"
 #include "midi2.h"
 #include "instrument/ui.h"
+#include "midici/midici.h"
 #include "midici/responder.h"
 #include "pads/pad_engine.h"
 #include "platform/pads.h"
@@ -82,6 +83,7 @@ static void pe_apply_settings(const struct settings *s)
 static void main_loop(void)
 {
     check_transport();
+    midici_tick(g_ms);
     ui_poll(g_ms);
 }
 

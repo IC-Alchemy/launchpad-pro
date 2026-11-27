@@ -234,6 +234,8 @@ uint16_t ump_sysex7_pack(uint32_t *out, uint16_t max_words, uint8_t group, const
 	uint16_t packets, p;
 	uint32_t n;
 
+	if (!out || (len > 0 && !data))
+		return 0;
 	if (len && data[0] == 0xF0) {
 		data++;
 		len--;
@@ -241,13 +243,13 @@ uint16_t ump_sysex7_pack(uint32_t *out, uint16_t max_words, uint8_t group, const
 	if (len && data[len - 1] == 0xF7)
 		len--;
 
-	packets = len ? (uint16_t)((len + 5) / 6) : 1;
-	n = (uint32_t)packets * 2;
+	packets = len ? (uint16_t)(((uint32_t)len + 5u) / 6u) : 1u;
+	n = (uint32_t)packets * 2u;
 	if (n > max_words)
 		return 0;
 
 	for (p = 0; p < packets; p++)
-		ump_sysex7_packet(out + 2 * p, group, data, len, p, packets);
+		ump_sysex7_packet(out + 2u * p, group, data, len, p, packets);
 	return (uint16_t)n;
 }
 
@@ -255,9 +257,15 @@ void ump_sysex7_packet(uint32_t out[2], uint8_t group, const uint8_t *payload, u
                        uint16_t p, uint16_t packets)
 {
 	uint8_t b[6] = {0, 0, 0, 0, 0, 0};
-	uint16_t remaining = (uint16_t)(len - p * 6);
-	uint8_t cnt = remaining > 6 ? 6 : (uint8_t)remaining;
-	uint8_t st, i;
+	uint32_t offset;
+	uint16_t remaining;
+	uint8_t cnt, st, i;
+
+	if (!out || (len > 0 && !payload) || packets == 0 || p >= packets)
+		return;
+	offset = (uint32_t)p * 6u;
+	remaining = offset < len ? (uint16_t)(len - offset) : 0u;
+	cnt = remaining > 6 ? 6 : (uint8_t)remaining;
 
 	if (packets == 1)
 		st = 0;
@@ -268,7 +276,7 @@ void ump_sysex7_packet(uint32_t out[2], uint8_t group, const uint8_t *payload, u
 	else
 		st = 2;
 	for (i = 0; i < cnt; i++)
-		b[i] = payload[p * 6 + i] & 0x7F;
+		b[i] = payload[offset + i] & 0x7F;
 	out[0] = (3u << 28) | ((uint32_t)(group & 0xF) << 24) | ((uint32_t)st << 20) |
 	         ((uint32_t)cnt << 16) | ((uint32_t)b[0] << 8) | b[1];
 	out[1] = ((uint32_t)b[2] << 24) | ((uint32_t)b[3] << 16) | ((uint32_t)b[4] << 8) | b[5];
@@ -276,18 +284,26 @@ void ump_sysex7_packet(uint32_t out[2], uint8_t group, const uint8_t *payload, u
 
 void ump_sysex7_rx_reset(struct ump_sysex7_rx *rx)
 {
+	if (!rx)
+		return;
 	rx->len = 0;
 	rx->active = 0;
 }
 
 int ump_sysex7_rx_feed(struct ump_sysex7_rx *rx, const uint32_t msg[2])
 {
-	uint32_t w0 = msg[0], w1 = msg[1];
-	uint8_t st = (uint8_t)((w0 >> 20) & 0xF);
-	uint8_t cnt = (uint8_t)((w0 >> 16) & 0xF);
+	uint32_t w0, w1;
+	uint8_t st, cnt;
 	uint8_t b[6];
 	uint8_t i;
 	int rc = 0;
+
+	if (!rx || !msg)
+		return -1;
+	w0 = msg[0];
+	w1 = msg[1];
+	st = (uint8_t)((w0 >> 20) & 0xF);
+	cnt = (uint8_t)((w0 >> 16) & 0xF);
 
 	if ((w0 >> 28) != 3 || cnt > 6 || st > 3) {
 		ump_sysex7_rx_reset(rx);

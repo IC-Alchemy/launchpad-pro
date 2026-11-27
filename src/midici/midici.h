@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * MIDI-CI over USB UMP (SysEx7, MT 0x3): transport plumbing.
  *
@@ -18,9 +22,14 @@
 #define CI_RX_QUEUE_PACKETS 64		/* 2 words each */
 #define CI_TX_QUEUE_PACKETS 128
 #define CI_REASSEMBLY_BYTES 512
+#define CI_REASSEMBLY_SLOTS 4
 #define CI_REPLY_BYTES 512
 /* Max CiTxQueue packets moved to the UMP TX ring per USB TX pass. */
 #define CI_TX_DRAIN_MAX 4
+
+/* Deterministic full reset of midici state (queues, reassembly slots, counters,
+ * MUID); preserves registered handler. */
+void midici_init(void);
 
 /* A whole MIDI-CI message: payload starts at the 0x7E and excludes F0/F7
  * (the form MidiCiMessage.h Parse() takes). Main-loop context. */
@@ -42,9 +51,20 @@ uint16_t midici_rx_free_packets(void);
  * messages to the handler and every other SysEx to app_sysex_event. */
 void midici_poll(void);
 
+/* Main loop: advances MIDI-CI initiator timers and follow-up pacing. */
+void midici_tick(uint32_t now_ms);
+/* Main loop: notifies initiator that USB Alt 1 + UMP Stream negotiation completed. */
+void midici_on_ump_negotiated(uint32_t now_ms);
+
 /* Main loop: queues a whole F0..F7 SysEx7 message (or its payload alone) for
  * the given UMP group, all or nothing. 0, or -1 if CiTxQueue has no room. */
 int midici_send_sysex(uint8_t group, const uint8_t *data, uint16_t len);
+
+/* Splits a raw SysEx7 payload (without F0/F7) into 64-bit UMP MT 0x3 packets
+ * (6 bytes/packet, & 0x7F masked, 0 bytes -> 1 kComplete packet).
+ * Returns packet count written, or 0 on invalid arguments / insufficient max_packets. */
+uint16_t midici_packetize_sysex7(uint8_t group, const uint8_t *payload, uint16_t len,
+                                 uint32_t (*out)[2], uint16_t max_packets);
 
 /* Packets still waiting in CiTxQueue (main loop). */
 uint16_t midici_tx_pending(void);
@@ -70,5 +90,9 @@ uint32_t midici_rx_overflows(void);
 uint32_t midici_tx_overflows(void);
 uint32_t midici_messages_received(void);
 uint32_t midici_reassembly_drops(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

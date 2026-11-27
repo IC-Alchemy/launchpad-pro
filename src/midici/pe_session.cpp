@@ -72,9 +72,16 @@ bool have_last_seen;
 
 uint8_t my_request_id;	/* for the notifies we initiate */
 
-/* The last initiator that sent us a Discovery, and the SysEx size it can take. */
-uint32_t peer_muid = ms::MuidBroadcast;
-uint32_t peer_max_sysex;
+constexpr uint8_t kPeerCacheSize = 8;
+constexpr uint32_t kDefaultPeerMaxSysEx = 512;
+constexpr uint32_t kPeerOccupied = 0x80000000u;
+
+struct PeerMax {
+	uint32_t muid;		/* 0 = empty; occupied entries carry kPeerOccupied */
+	uint32_t max_sysex;
+};
+/* Most-recently-used initiators and the SysEx sizes they declared in Discovery. */
+PeerMax peer_cache[kPeerCacheSize];
 
 int sub_index(uint8_t resource)
 {
@@ -92,7 +99,8 @@ void reset_now()
 	for (auto &s : subs)
 		s.active = false;
 	notify_pending = 0;
-	peer_muid = ms::MuidBroadcast;
+	for (auto &p : peer_cache)
+		p = {};
 }
 
 void check_reset()
@@ -101,12 +109,29 @@ void check_reset()
 		reset_now();
 }
 
+void promote_peer(uint8_t idx, const PeerMax &entry)
+{
+	for (uint8_t i = idx; i > 0; i--)
+		peer_cache[i] = peer_cache[i - 1];
+	peer_cache[0] = entry;
+}
+
 uint16_t message_limit(uint32_t destination)
 {
-	uint32_t limit = CI_PE_MESSAGE_MAX;
-	/* 128 is the smallest any MIDI-CI device may declare; anything below is noise */
-	if (destination == peer_muid && peer_max_sysex >= 128 && peer_max_sysex < limit)
-		limit = peer_max_sysex;
+	uint32_t peer_max = kDefaultPeerMaxSysEx;
+	const uint32_t key = destination | kPeerOccupied;
+	for (uint8_t i = 0; i < kPeerCacheSize && peer_cache[i].muid != 0; i++) {
+		if (peer_cache[i].muid == key) {
+			const PeerMax entry = peer_cache[i];
+			if (i > 0)
+				promote_peer(i, entry);
+			/* 128 is the smallest any MIDI-CI device may declare; anything below is noise */
+			if (entry.max_sysex >= 128)
+				peer_max = entry.max_sysex;
+			break;
+		}
+	}
+	const uint32_t limit = peer_max < CI_PE_MESSAGE_MAX ? peer_max : CI_PE_MESSAGE_MAX;
 	return static_cast<uint16_t>(limit);
 }
 
@@ -207,25 +232,25 @@ size_t build_chunk(uint8_t *buf, size_t cap, uint32_t my_muid, const char *piid)
 
 void emit(uint32_t my_muid, const char *piid)
 {
-	while (out.active) {
-		uint16_t cap = 0;
-		uint8_t *buf = midici_reply_buffer(&cap);
-		/* sized from the plan before building, so a full queue costs nothing */
-		const uint16_t header = out.next_chunk == 1 ? out.header_len : 0;
-		const uint16_t budget = out.next_chunk == 1 ? out.first_data : out.later_data;
-		const uint16_t packets = static_cast<uint16_t>(
-			(ms::PropertyExchangeFixedByteCount + header + budget + 5) / 6);
-		if (midici_tx_free_packets() < packets)
-			return;
-		const size_t n = build_chunk(buf, cap, my_muid, piid);
-		if (n == 0 || midici_send_sysex(kGroup, buf, static_cast<uint16_t>(n)) != 0) {
-			/* cannot happen with the sizes above; never spin on it */
-			out.active = false;
-			return;
-		}
-		if (++out.next_chunk > out.chunk_count)
-			out.active = false;
+	if (!out.active)
+		return;
+	uint16_t cap = 0;
+	uint8_t *buf = midici_reply_buffer(&cap);
+	/* sized from the plan before building, so a full queue costs nothing */
+	const uint16_t header = out.next_chunk == 1 ? out.header_len : 0;
+	const uint16_t budget = out.next_chunk == 1 ? out.first_data : out.later_data;
+	const uint16_t packets = static_cast<uint16_t>(
+		(ms::PropertyExchangeFixedByteCount + header + budget + 5) / 6);
+	if (midici_tx_free_packets() < packets)
+		return;
+	const size_t n = build_chunk(buf, cap, my_muid, piid);
+	if (n == 0 || midici_send_sysex(kGroup, buf, static_cast<uint16_t>(n)) != 0) {
+		/* cannot happen with the sizes above; never spin on it */
+		out.active = false;
+		return;
 	}
+	if (++out.next_chunk > out.chunk_count)
+		out.active = false;
 }
 
 /* ---- incoming ---- */
@@ -251,9 +276,12 @@ Header parse_header(const uint8_t *p, uint16_t n)
 	ci_json_it_init(&it, reinterpret_cast<const char *>(p), n);
 	while ((r = ci_json_next(&it, &m)) == 1) {
 		if (ci_json_key_is(&m, "resource")) {
-			h.has_resource = true;
-			if (m.type == CI_JSON_STR)
+			if (m.type == CI_JSON_STR) {
+				h.has_resource = true;
 				h.resource = ci_pe_lookup(m.str, m.str_len);
+			} else {
+				h.malformed = true;
+			}
 		} else if (ci_json_key_is(&m, "setPartial")) {
 			h.set_partial = m.type == CI_JSON_BOOL && m.num;
 		} else if (ci_json_key_is(&m, "mutualEncoding")) {
@@ -275,7 +303,8 @@ Header parse_header(const uint8_t *p, uint16_t n)
 			h.status = m.type == CI_JSON_INT ? m.num : 0;
 		}
 	}
-	h.malformed = r < 0;
+	if (r < 0)
+		h.malformed = true;
 	return h;
 }
 
@@ -396,6 +425,10 @@ void on_subscription(const ms::ParsedMessage &m, const uint8_t *payload)
 		return;
 	}
 	if (h.command == Header::START) {
+		if (!h.has_resource) {
+			reply_status(reply, m, CI_PE_STATUS_BAD_REQUEST);
+			return;
+		}
 		const uint8_t r = available(h);
 		const int i = sub_index(r);
 		if (r == CI_PE_NONE || i < 0) {
@@ -463,8 +496,17 @@ void request_reset()
 void note_initiator(uint32_t muid, uint32_t max_sysex)
 {
 	check_reset();
-	peer_muid = muid;
-	peer_max_sysex = max_sysex;
+	if (!ms::MuidIsUsable(muid))
+		return;
+	const uint32_t key = muid | kPeerOccupied;
+	uint8_t idx = kPeerCacheSize - 1;
+	for (uint8_t i = 0; i < kPeerCacheSize; i++) {
+		if (peer_cache[i].muid == key || peer_cache[i].muid == 0) {
+			idx = i;
+			break;
+		}
+	}
+	promote_peer(idx, PeerMax{key, max_sysex});
 }
 
 void forget_initiator(uint32_t muid)
@@ -477,13 +519,21 @@ void forget_initiator(uint32_t muid)
 		out.active = false;
 	if (set_rx.active && set_rx.source == muid)
 		set_rx.active = false;
-	if (peer_muid == muid)
-		peer_muid = ms::MuidBroadcast;
+	const uint32_t key = muid | kPeerOccupied;
+	for (uint8_t i = 0; i < kPeerCacheSize && peer_cache[i].muid != 0; i++) {
+		if (peer_cache[i].muid == key) {
+			for (uint8_t j = i; j + 1 < kPeerCacheSize; j++)
+				peer_cache[j] = peer_cache[j + 1];
+			peer_cache[kPeerCacheSize - 1] = {};
+			break;
+		}
+	}
 }
 
 void handle(const ms::ParsedMessage &m, const uint8_t *payload, size_t len, uint32_t my_muid, const char *piid)
 {
 	(void)len;
+	(void)my_muid;
 	check_reset();
 	const T type = m.Type;
 	const bool inquiry = type == T::PropertyGetDataInquiry || type == T::PropertySetDataInquiry ||
@@ -507,7 +557,6 @@ void handle(const ms::ParsedMessage &m, const uint8_t *payload, size_t len, uint
 		/* replies to our notifies (0x39) and stray replies: nothing to do */
 		break;
 	}
-	emit(my_muid, piid);
 }
 
 void poll(uint32_t my_muid, const char *piid)

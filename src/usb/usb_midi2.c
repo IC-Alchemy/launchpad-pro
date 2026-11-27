@@ -17,12 +17,14 @@
 #include "ump/ump.h"
 #include "midici/midici.h"
 #include "midici/responder.h"
+#include "midici/initiator.h"
 #include "midi2.h"
 #include <string.h>
 
 static volatile uint8_t alt;
 static volatile uint8_t pending_service;
 static volatile uint8_t rx_paused;
+static volatile uint8_t neg_notified;
 
 /* USBParserToDev right after midi_parsers_init (its initial state) */
 static uint8_t parser_snapshot[sizeof USBParserToDev];
@@ -52,6 +54,7 @@ void usb_midi2_set_alt(uint8_t new_alt)
 	ClearDTOG_RX(1);
 	ClearDTOG_TX(1);
 	alt = new_alt ? 1 : 0;
+	neg_notified = 0;
 	ump_rx_reset();
 	ump_tx_reset();
 	ump_stream_reset();
@@ -163,6 +166,11 @@ u8 midi2_active(void)
 	return alt && ump_stream_protocol() == UMP_PROTO_MIDI2;
 }
 
+u8 midi2_ump_negotiated(void)
+{
+	return alt && bDeviceState == USB_STATE_CONFIGURED && ump_stream_negotiated();
+}
+
 void midi2_debug_pause_rx(u8 paused)
 {
 	rx_paused = paused ? 1 : 0;
@@ -241,6 +249,7 @@ void __wrap_midi_parsers_init(void)
 {
 	__real_midi_parsers_init();
 	midici_responder_init();
+	midici_initiator_init();
 	memcpy(parser_snapshot, USBParserToDev, sizeof parser_snapshot);
 	parser_snapshot_valid = 1;
 	ump_stream_set_protocol_hook(midi2_protocol_changing);
@@ -261,6 +270,7 @@ void __wrap_midi_parsers_poll(void)
 
 	usb_midi2_service();
 	if (!alt) {
+		neg_notified = 0;
 		__real_midi_parsers_poll();
 		if (main_loop_hook)
 			main_loop_hook();
@@ -268,6 +278,14 @@ void __wrap_midi_parsers_poll(void)
 	}
 	if (!rx_paused)
 		ump_rx_poll();
+	if (midi2_ump_negotiated()) {
+		if (!neg_notified) {
+			neg_notified = 1;
+			midici_on_ump_negotiated(midici_initiator_now_ms());
+		}
+	} else {
+		neg_notified = 0;
+	}
 	/* re-arm EP1 OUT once the ring has room for a whole 64-byte packet and,
 	 * as c_midi's midi_parsers_poll does in alt 0, the DIN Out fifo has
 	 * drained: that paces the host to the DIN wire rate */

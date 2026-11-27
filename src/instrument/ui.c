@@ -1,6 +1,7 @@
 #include "instrument/ui.h"
 #include "instrument/settings.h"
 #include "instrument/io.h"
+#include "midici/initiator.h"
 #include "pads/pad_engine.h"
 #include "scales/scales.h"
 #include "scales/tuning.h"
@@ -18,8 +19,9 @@
 #define BTN_SCALE    95
 #define BTN_OPTIONS  96
 #define BTN_TUNING   97
+#define BTN_MIDICI   98
 
-enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING };
+enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING, PAGE_MIDICI };
 
 /* menu item colour families, each dim (index 0) and bright (index 1) */
 enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING,
@@ -80,6 +82,7 @@ static uint8_t g_page;          /* PAGE_*: shown in the menu, kept while closed 
 static uint8_t g_peek;          /* the Setup press held now opened the menu */
 static uint32_t g_play_t;       /* ms counter at the last grid press or release
                                  * on the play page */
+static uint8_t g_ci_pad_state[9]; /* [0]=pad 11, [1..8]=pads 21..28 */
 
 /* A menu pad: the settings field it sets, the value, its colour family and
  * whether a tap toggles the field instead. */
@@ -168,7 +171,7 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 		it->field = &g_s.tuning;
 		it->value = TUNINGS[at].id;
 		it->kind = (uint8_t)(K_EQUAL + TUNINGS[at].family);
-	} else {
+	} else if (g_page == PAGE_OPTIONS) {
 		if (r == 8 && c < 4) {
 			/* menu order: Peak-window, Zero-latency, Two-stage, Fixed */
 			static const uint8_t VEL_AT[4] = {VEL_PEAK_WINDOW, VEL_ZERO_LATENCY,
@@ -198,13 +201,21 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 		} else {
 			return 0;
 		}
+	} else {
+		return 0;
 	}
 	return 1;
 }
 
 static uint8_t page_of(uint8_t button)
 {
-	return button == BTN_OPTIONS ? PAGE_OPTIONS : button == BTN_TUNING ? PAGE_TUNING : PAGE_SCALE;
+	if (button == BTN_OPTIONS)
+		return PAGE_OPTIONS;
+	if (button == BTN_TUNING)
+		return PAGE_TUNING;
+	if (button == BTN_MIDICI)
+		return PAGE_MIDICI;
+	return PAGE_SCALE;
 }
 
 #define A4_NONE (-1)
@@ -225,14 +236,51 @@ static int8_t a4_pad(uint8_t i)
 	return A4_NONE;
 }
 
+static uint8_t midici_pad_state(uint8_t i)
+{
+	if (i == 11)
+		return midici_initiator_is_discovering() ? 1u : 0u;
+	if (i >= 21 && i <= 28) {
+		uint8_t idx = (uint8_t)(i - 21u);
+		ci_peer_info_t p;
+
+		if (idx >= midici_initiator_peer_count() || !midici_initiator_get_peer(idx, &p))
+			return 0u;
+		if (p.flags & CI_PEER_FLAG_COMPLETE)
+			return (p.categories & 0x08u) ? 3u : 2u;
+		return 1u;
+	}
+	return 0u;
+}
+
+static const uint8_t *midici_pad_colour(uint8_t i)
+{
+	uint8_t st = midici_pad_state(i);
+
+	if (i == 11)
+		return ITEM_RGB[K_EQUAL][st ? 1 : 0];
+	if (i >= 21 && i <= 28) {
+		if (st == 1u)
+			return ITEM_RGB[K_LAYOUT][1];
+		if (st == 2u)
+			return ITEM_RGB[K_EQUAL][1];
+		if (st == 3u)
+			return ITEM_RGB[K_ROOT][1];
+	}
+	return RGB_OFF;
+}
+
 static const uint8_t *colour(uint8_t i)
 {
 	if (g_menu) {
 		struct item it;
 
 		if (is_grid(i)) {
-			int8_t a4 = a4_pad(i);
+			int8_t a4;
 
+			if (g_page == PAGE_MIDICI)
+				return midici_pad_colour(i);
+			a4 = a4_pad(i);
 			if (a4 >= 0)
 				return ITEM_RGB[K_A4][A4_PRESET[a4] == g_s.a4_tenths];
 			if (a4 == A4_STEP_PAD)
@@ -241,7 +289,7 @@ static const uint8_t *colour(uint8_t i)
 				return RGB_OFF;
 			return ITEM_RGB[it.kind][it.toggle ? *it.field != 0 : *it.field == it.value];
 		}
-		if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING)
+		if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING || i == BTN_MIDICI)
 			return page_of(i) == g_page ? RGB_WHITE : RGB_DIM_WHITE;
 		return RGB_OFF;
 	}
@@ -265,6 +313,35 @@ static void draw(uint8_t i)
 	io_led(TYPEPAD, i, c[0], c[1], c[2]);
 }
 
+static void sync_midici_snapshot(void)
+{
+	uint8_t k;
+
+	g_ci_pad_state[0] = midici_pad_state(11);
+	for (k = 0; k < 8; k++)
+		g_ci_pad_state[1u + k] = midici_pad_state((uint8_t)(21u + k));
+}
+
+static void refresh_midici_pads(void)
+{
+	uint8_t k;
+	uint8_t st = midici_pad_state(11);
+
+	if (st != g_ci_pad_state[0]) {
+		g_ci_pad_state[0] = st;
+		draw(11);
+	}
+	for (k = 0; k < 8; k++) {
+		uint8_t pad = (uint8_t)(21u + k);
+
+		st = midici_pad_state(pad);
+		if (st != g_ci_pad_state[1u + k]) {
+			g_ci_pad_state[1u + k] = st;
+			draw(pad);
+		}
+	}
+}
+
 /* every pad and button LED, clearing those the page doesn't use */
 static void draw_all(void)
 {
@@ -273,6 +350,8 @@ static void draw_all(void)
 	for (i = 1; i <= 98; i++)
 		if (i != 9 && i != 90)
 			draw(i);
+	if (g_menu && g_page == PAGE_MIDICI)
+		sync_midici_snapshot();
 }
 
 static void draw_setup_led(void)
@@ -333,6 +412,7 @@ void ui_init(uint32_t now)
 	settings_load(&g_s);
 	configure();
 	memset(g_sounding, 0, sizeof g_sounding);
+	memset(g_ci_pad_state, 0, sizeof g_ci_pad_state);
 	g_menu = 0;
 	g_page = PAGE_SCALE;
 	g_peek = 0;
@@ -366,13 +446,22 @@ static void menu_pad(uint8_t i, uint32_t now)
 	struct item it;
 	uint8_t v;
 
-	if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING) {
+	if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING || i == BTN_MIDICI) {
 		g_page = page_of(i);
+		if (g_page == PAGE_MIDICI)
+			midici_initiator_start_discovery(now);
 		draw_all();
 		return;
 	}
 	if (!is_grid(i))
 		return;
+	if (g_page == PAGE_MIDICI) {
+		if (i == 11) {
+			midici_initiator_start_discovery(now);
+			draw_all();
+		}
+		return;
+	}
 	if (a4_pad(i) != A4_NONE) {
 		int8_t p = a4_pad(i);
 		int32_t a4 = p >= 0 ? A4_PRESET[p] : g_s.a4_tenths + A4_STEP[i % 10 - 1];
@@ -446,6 +535,8 @@ void ui_setup(uint8_t value, uint32_t now)
 void ui_poll(uint32_t now)
 {
 	pe_poll(now);
+	if (g_menu && g_page == PAGE_MIDICI)
+		refresh_midici_pads();
 	if ((uint32_t)(now - g_led_t) >= SETUP_LED_MS) {
 		g_led_t = now;
 		draw_setup_led();
@@ -480,6 +571,8 @@ void ui_transport_changed(uint32_t now)
 	memset(g_sounding, 0, sizeof g_sounding);
 	if (!g_menu)
 		draw_all();
+	else if (g_page == PAGE_MIDICI)
+		refresh_midici_pads();
 	draw_setup_led();
 	g_led_t = now;
 }

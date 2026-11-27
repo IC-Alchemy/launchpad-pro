@@ -1,11 +1,17 @@
 #include "test.h"
 #include "instrument/ui.h"
 #include "instrument/settings.h"
+#include "midici/midici.h"
+#include "midici/responder.h"
+#include "midici/initiator.h"
 #include "pads/pad_engine.h"
 #include "pads/pad_velocity.h"
 #include "scales/scales.h"
+#include "ump/ump.h"
 #include "stubs/io_stub.h"
+#include "stubs/stubs.h"
 #include "app_defs.h"
+#include <string.h>
 
 #define T0 1000u
 
@@ -774,6 +780,259 @@ static void test_two_stage_no_note_while_menu_open(void)
 	CHECK_EQ(count_kind(0, 'N'), 0);
 }
 
+static void setup_ci(void)
+{
+	stubs_reset();
+	ump_rx_reset();
+	ump_tx_reset();
+	midici_init();
+	midici_responder_init();
+	midici_initiator_init();
+	setup();
+}
+
+static void drain_ci_tx(void)
+{
+	uint8_t pkt[64];
+
+	while (midici_tx_pending()) {
+		midici_tx_drain(100);
+		while (ump_tx_fill_packet(pkt) > 0) {}
+	}
+}
+
+static void ui_write_muid(uint8_t *p, uint32_t m)
+{
+	p[0] = (uint8_t)(m & 0x7Fu);
+	p[1] = (uint8_t)((m >> 7) & 0x7Fu);
+	p[2] = (uint8_t)((m >> 14) & 0x7Fu);
+	p[3] = (uint8_t)((m >> 21) & 0x7Fu);
+}
+
+static void feed_peer_discovery(uint32_t peer_muid, uint32_t my_muid, uint8_t cat, uint32_t now)
+{
+	uint8_t msg[31];
+	uint16_t n = 0;
+
+	msg[n++] = 0x7E; msg[n++] = 0x7F; msg[n++] = 0x0D; msg[n++] = 0x71; msg[n++] = 0x02;
+	ui_write_muid(msg + n, peer_muid); n += 4;
+	ui_write_muid(msg + n, my_muid); n += 4;
+	msg[n++] = 0x00; msg[n++] = 0x20; msg[n++] = 0x33;
+	msg[n++] = 0x10; msg[n++] = 0x00;
+	msg[n++] = 0x20; msg[n++] = 0x00;
+	msg[n++] = 1; msg[n++] = 0; msg[n++] = 0; msg[n++] = 0;
+	msg[n++] = cat;
+	ui_write_muid(msg + n, 512u); n += 4;
+	msg[n++] = 0;
+	msg[n++] = 0;
+	CHECK(midici_initiator_on_message(0, msg, n, now));
+}
+
+static void feed_peer_endpoint(uint32_t peer_muid, uint32_t my_muid, uint32_t now)
+{
+	uint8_t msg[24];
+	uint16_t n = 0;
+
+	msg[n++] = 0x7E; msg[n++] = 0x7F; msg[n++] = 0x0D; msg[n++] = 0x73; msg[n++] = 0x02;
+	ui_write_muid(msg + n, peer_muid); n += 4;
+	ui_write_muid(msg + n, my_muid); n += 4;
+	msg[n++] = 0x00;
+	msg[n++] = 4; msg[n++] = 0;
+	msg[n++] = 'P'; msg[n++] = 'E'; msg[n++] = 'E'; msg[n++] = 'R';
+	CHECK(midici_initiator_on_message(0, msg, n, now));
+}
+
+static void feed_peer_pe_caps_and_device_info(uint32_t peer_muid, uint32_t my_muid, uint32_t now)
+{
+	uint8_t msg[96];
+	uint16_t n = 0;
+	const char *hdr = "{\"status\":200}";
+	const char *body = "{\"manufacturerId\":[0,32,41]}";
+	uint16_t hl = (uint16_t)strlen(hdr);
+	uint16_t dl = (uint16_t)strlen(body);
+
+	midici_initiator_tick(now + 1u);
+	midici_initiator_tick(now + 2u);
+	drain_ci_tx();
+
+	msg[n++] = 0x7E; msg[n++] = 0x7F; msg[n++] = 0x0D; msg[n++] = 0x31; msg[n++] = 0x02;
+	ui_write_muid(msg + n, peer_muid); n += 4;
+	ui_write_muid(msg + n, my_muid); n += 4;
+	msg[n++] = 1; msg[n++] = 0; msg[n++] = 0;
+	CHECK(midici_initiator_on_message(0, msg, n, now + 3u));
+
+	midici_initiator_tick(now + 4u);
+	drain_ci_tx();
+
+	n = 0;
+	msg[n++] = 0x7E; msg[n++] = 0x7F; msg[n++] = 0x0D; msg[n++] = 0x35; msg[n++] = 0x02;
+	ui_write_muid(msg + n, peer_muid); n += 4;
+	ui_write_muid(msg + n, my_muid); n += 4;
+	msg[n++] = 1;
+	msg[n++] = (uint8_t)hl; msg[n++] = 0;
+	memcpy(msg + n, hdr, hl); n += hl;
+	msg[n++] = 1; msg[n++] = 0;
+	msg[n++] = 1; msg[n++] = 0;
+	msg[n++] = (uint8_t)dl; msg[n++] = 0;
+	memcpy(msg + n, body, dl); n += dl;
+	CHECK(midici_initiator_on_message(0, msg, n, now + 5u));
+}
+
+static void test_midici_button_play_and_menu_entry(void)
+{
+	struct settings before;
+
+	setup_ci();
+	before = *ui_settings();
+	tap(98, T0 + 10);
+	CHECK_EQ(ui_menu_open(), 0);
+	CHECK_EQ(midici_tx_pending(), 0);
+	CHECK_EQ(midici_initiator_is_discovering(), 0);
+	CHECK_EQ(io_n, 0);
+	CHECK(led_is(98, 0, 0, 0));
+	CHECK_MEM(&before, ui_settings(), sizeof before);
+
+	setup_tap(T0 + 50);
+	CHECK_EQ(ui_menu_open(), 1);
+	/* Release-only on 98 does not switch page or trigger Discovery */
+	ui_pad(98, 0, T0 + 80);
+	CHECK_EQ(midici_initiator_is_discovering(), 0);
+	CHECK_EQ(midici_tx_pending(), 0);
+
+	/* Pressing 98 enters PAGE_MIDICI and starts Discovery */
+	tap(98, T0 + 100);
+	CHECK(led_is(98, 63, 63, 63));
+	CHECK(led_is(95, 6, 6, 6));
+	CHECK(led_is(96, 6, 6, 6));
+	CHECK(led_is(97, 6, 6, 6));
+	CHECK(led_is(91, 0, 0, 0));
+	CHECK_EQ(midici_initiator_is_discovering(), 1);
+	CHECK(midici_tx_pending() > 0);
+	ui_poll(T0 + 100 + SETTINGS_SAVE_QUIET_MS);
+	CHECK_EQ(io_flash_writes, 0);
+	CHECK_MEM(&before, ui_settings(), sizeof before);
+}
+
+static void test_midici_pad11_trigger_and_window_expiry(void)
+{
+	struct settings before;
+
+	setup_ci();
+	before = *ui_settings();
+	setup_tap(T0);
+	tap(98, T0 + 10);
+	drain_ci_tx();
+	CHECK(led_is(11, 0, 48, 63));
+	CHECK(led_is(21, 0, 0, 0));
+	CHECK(led_is(28, 0, 0, 0));
+
+	/* 3000 ms window expires -> pad 11 dims to idle cyan */
+	midici_initiator_tick(T0 + 10 + 3000);
+	ui_poll(T0 + 10 + 3000);
+	CHECK_EQ(midici_initiator_is_discovering(), 0);
+	CHECK(led_is(11, 0, 6, 8));
+
+	/* Other grid pads do nothing and never touch settings */
+	tap(12, T0 + 3020);
+	tap(54, T0 + 3021);
+	tap(31, T0 + 3022);
+	CHECK_EQ(midici_initiator_is_discovering(), 0);
+	CHECK_EQ(midici_tx_pending(), 0);
+	CHECK_MEM(&before, ui_settings(), sizeof before);
+
+	/* Pad 11 re-triggers Discovery */
+	tap(11, T0 + 3030);
+	CHECK_EQ(midici_initiator_is_discovering(), 1);
+	CHECK(midici_tx_pending() > 0);
+	CHECK(led_is(11, 0, 48, 63));
+	ui_poll(T0 + 3030 + SETTINGS_SAVE_QUIET_MS);
+	CHECK_EQ(io_flash_writes, 0);
+}
+
+static void test_midici_peer_leds_and_poll_refresh(void)
+{
+	uint32_t my_muid;
+	uint8_t i;
+
+	setup_ci();
+	setup_tap(T0);
+	tap(98, T0 + 10);
+	my_muid = midici_muid();
+	drain_ci_tx();
+
+	/* Peer 0 (PE-capable) discovered -> pending amber on pad 21 */
+	feed_peer_discovery(0x00110001u, my_muid, 0x08u, T0 + 20);
+	ui_poll(T0 + 21);
+	CHECK(led_is(21, 63, 24, 0));
+	CHECK(led_is(22, 0, 0, 0));
+
+	/* Peer 0 completes Endpoint + PE Caps + DeviceInfo -> green on pad 21 */
+	feed_peer_endpoint(0x00110001u, my_muid, T0 + 22);
+	feed_peer_pe_caps_and_device_info(0x00110001u, my_muid, T0 + 23);
+	ui_poll(T0 + 30);
+	CHECK(led_is(21, 0, 63, 0));
+
+	/* Peer 1 (non-PE) completes Endpoint -> cyan on pad 22 */
+	feed_peer_discovery(0x00110002u, my_muid, 0x00u, T0 + 31);
+	feed_peer_endpoint(0x00110002u, my_muid, T0 + 32);
+	ui_poll(T0 + 35);
+	CHECK(led_is(22, 0, 48, 63));
+	CHECK(led_is(23, 0, 0, 0));
+
+	/* Fill peers 2..8 (9 total -> capped at 8 on pads 21..28, pad 99 untouched) */
+	for (i = 2; i < 9; i++)
+		feed_peer_discovery(0x00110001u + i, my_muid, 0x00u, (uint32_t)(T0 + 40 + i));
+	ui_poll(T0 + 60);
+	for (i = 0; i < 8; i++)
+		CHECK(!led_is((uint8_t)(21 + i), 0, 0, 0));
+	CHECK(led_is(99, 0, 0, 0));
+
+	/* Reset clears peers -> pads 21..28 revert to off on ui_poll */
+	midici_initiator_reset();
+	ui_poll(T0 + 70);
+	for (i = 0; i < 8; i++)
+		CHECK(led_is((uint8_t)(21 + i), 0, 0, 0));
+
+	/* Closing Setup restores play-page LEDs; background peer does not overwrite them */
+	setup_tap(T0 + 100);
+	CHECK_EQ(ui_menu_open(), 0);
+	CHECK(led_is(11, 0, 20, 63));
+	CHECK(led_is(98, 0, 0, 0));
+
+	midici_initiator_start_discovery(T0 + 110);
+	feed_peer_discovery(0x00110010u, my_muid, 0x00u, T0 + 111);
+	ui_poll(T0 + 112);
+	CHECK(led_is(21, 0, 4, 16)); /* still Play-page scale colour */
+
+	/* Reopening Setup restores PAGE_MIDICI with the peer LED */
+	setup_tap(T0 + 200);
+	CHECK(led_is(98, 63, 63, 63));
+	CHECK(led_is(21, 63, 24, 0));
+}
+
+static void test_midici_preserves_tuning_and_options_controls(void)
+{
+	setup_ci();
+	setup_tap(T0);
+	tap(98, T0 + 10);
+	CHECK(led_is(98, 63, 63, 63));
+
+	/* BTN_TUNING (97) still selects Tuning page and changes tuning */
+	tap(97, T0 + 20);
+	CHECK(led_is(97, 63, 63, 63));
+	CHECK(led_is(98, 6, 6, 6));
+	tap(82, T0 + 30);
+	CHECK_EQ(ui_settings()->tuning, 1);
+
+	/* BTN_OPTIONS (96) still keeps row 3 smoothing (31..34) and pad 54 (instant) */
+	tap(96, T0 + 40);
+	CHECK(led_is(96, 63, 63, 63));
+	tap(34, T0 + 50);
+	CHECK_EQ(ui_settings()->pressure_smoothing, SMOOTH_HEAVY);
+	tap(54, T0 + 60);
+	CHECK_EQ(ui_settings()->pressure_threshold, THRESH_INSTANT);
+}
+
 void test_ui_all(void)
 {
 	RUN(test_play_page_colours_default);
@@ -806,4 +1065,8 @@ void test_ui_all(void)
 	RUN(test_transport_change_forgets_held_notes);
 	RUN(test_two_stage_plays_scale_pitch);
 	RUN(test_two_stage_no_note_while_menu_open);
+	RUN(test_midici_button_play_and_menu_entry);
+	RUN(test_midici_pad11_trigger_and_window_expiry);
+	RUN(test_midici_peer_leds_and_poll_refresh);
+	RUN(test_midici_preserves_tuning_and_options_controls);
 }

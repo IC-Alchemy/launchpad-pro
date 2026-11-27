@@ -3,6 +3,7 @@
 #include "app.h"
 #include "midici/midici.h"
 #include "midici/responder.h"
+#include "midici/initiator.h"
 
 static uint32_t ring[UMP_RX_WORDS];
 static volatile uint16_t head; /* written by push (interrupt) */
@@ -40,6 +41,7 @@ void ump_rx_reset(void)
 	irq_restore(s);
 	midici_reset();
 	midici_responder_reset();
+	midici_initiator_reset();
 }
 
 uint16_t ump_rx_free_words(void)

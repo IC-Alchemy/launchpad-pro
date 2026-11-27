@@ -47,8 +47,8 @@ void forget_initiator(uint32_t muid);
 void handle(const WindowsMidiServicesCapabilityInquiry::ParsedMessage &message, const uint8_t *payload,
             size_t len, uint32_t my_muid, const char *piid);
 
-/* Main loop: notices settings changes for subscribers and sends whatever
- * chunks CiTxQueue has room for. */
+/* Main loop: notices settings changes for subscribers and sends at most one
+ * chunk per pass when CiTxQueue has room. */
 void poll(uint32_t my_muid, const char *piid);
 
 /* Test hooks. */

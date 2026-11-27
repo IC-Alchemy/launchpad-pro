@@ -1,5 +1,6 @@
 #include "midici/responder.h"
 #include "midici/ci_identity.h"
+#include "midici/initiator.h"
 #include "midici/pe_session.h"
 #include "vendor/MidiCiResponder.h"
 
@@ -78,6 +79,11 @@ size_t respond(const uint8_t *payload, size_t len, uint8_t *out, size_t capacity
 		return 0;
 	if (!initialized)
 		init_responder();
+	const bool self_src = message.SourceMuid == responder.Muid();
+	if (self_src &&
+	    (message.Type != T::Discovery ||
+	     midici_initiator_is_own_discovery_echo(payload, static_cast<uint16_t>(len))))
+		return 0;
 
 	const bool broadcast = message.DestinationMuid == ms::MuidBroadcast;
 	const bool management = message.Type == T::Discovery || message.Type == T::InvalidateMuid;
@@ -91,17 +97,17 @@ size_t respond(const uint8_t *payload, size_t len, uint8_t *out, size_t capacity
 	const bool inquiry = message.Type == T::Discovery || ms::MessageTypeExpectsAResponderAnswer(message.Type);
 	if (!version || (version & 0x70)) {
 		constexpr uint8_t nak_version_unsupported = 0x02;
-		return inquiry ? build_nak(message, nak_version_unsupported, out, capacity) : 0;
+		return !self_src && inquiry ? build_nak(message, nak_version_unsupported, out, capacity) : 0;
 	}
 	if (parsed != ms::ParseStatus::Ok ||
 	    (message.Type == T::Discovery && len < (version == ms::MessageVersion11
 	        ? ms::DiscoveryByteCountVersion11 : ms::DiscoveryByteCount)) ||
 	    (message.Type == T::EndpointInquiry && !message.HasEndpointFields))
-		return inquiry ? build_nak(message, ms::NakStatusMessageMalformed, out, capacity) : 0;
+		return !self_src && inquiry ? build_nak(message, ms::NakStatusMessageMalformed, out, capacity) : 0;
 
 	if (version == ms::MessageVersion11)
 		message.OutputPathId = 0;
-	if (message.Type == T::Discovery)
+	if (message.Type == T::Discovery && !self_src)
 		lp_pe::note_initiator(message.SourceMuid,
 			ms::ReadMuid(payload + ms::CommonHeaderByteCount + 12));	/* Receivable Maximum SysEx Size */
 	if (ms::MessageTypeCarriesPropertyExchangeData(message.Type)) {
@@ -163,15 +169,21 @@ void on_message(uint8_t group, const uint8_t *payload, uint16_t len)
 	/* A full CiTxQueue drops the reply; the initiator's Discovery retry recovers. */
 	if (bytes)
 		midici_send_sysex(group, out, static_cast<uint16_t>(bytes));
-	if (muid_changed)
+	if (muid_changed) {
 		notify_pending = true;	/* sent once the reply has left CiTxQueue */
-	midici_responder_poll();
+		midici_initiator_on_muid_changed();
+	} else if (bytes == 0) {
+		midici_initiator_on_message(group, payload, len, midici_initiator_now_ms());
+	}
 }
 
 } // namespace
 
 extern "C" void midici_responder_init(void)
 {
+	initialized = false;
+	notify_pending = false;
+	lp_pe::request_reset();
 	midici_set_handler(on_message);
 }
 

@@ -2,6 +2,8 @@
 // vendor library's ADC_Max.  ump_scale_up comes from src/ump/ump_codec.c.
 
 #include "midici/responder.h"
+#include "midici/initiator.h"
+#include "midici/midici.h"
 #include <stdio.h>
 #include "app.h"
 #include "midi2.h"
@@ -77,4 +79,41 @@ void midici_pe_bind(midici_settings_get_fn get, midici_settings_apply_fn apply)
 {
 	(void)get;
 	(void)apply;
+}
+
+u8 midi2_ump_negotiated(void)
+{
+	return 0;
+}
+
+void midici_tick(uint32_t now_ms)
+{
+	(void)now_ms;
+}
+
+void midici_on_ump_negotiated(uint32_t now_ms)
+{
+	(void)now_ms;
+}
+
+void midici_initiator_start_discovery(uint32_t now_ms)
+{
+	(void)now_ms;
+}
+
+uint8_t midici_initiator_peer_count(void)
+{
+	return 0;
+}
+
+bool midici_initiator_get_peer(uint8_t idx, ci_peer_info_t *out)
+{
+	(void)idx;
+	(void)out;
+	return false;
+}
+
+bool midici_initiator_is_discovering(void)
+{
+	return false;
 }

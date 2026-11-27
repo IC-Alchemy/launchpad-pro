@@ -9,7 +9,7 @@ FW_SOURCES += $(wildcard src/usb/*.c src/ump/*.c src/platform/*.c src/midici/*.c
 
 # MIDI-CI: Microsoft's header-only responder (src/midici/vendor) is C++17; the
 # check TU compiles it with the firmware flags (no exceptions, no RTTI, no libstdc++)
-FW_CXX_SOURCES += src/midici/vendor/ci_headers_check.cpp src/midici/responder.cpp src/midici/pe_session.cpp
+FW_CXX_SOURCES += src/midici/vendor/ci_headers_check.cpp src/midici/responder.cpp src/midici/pe_session.cpp src/midici/initiator.cpp
 
 INCLUDES += -Iinclude -Isrc
 
@@ -47,7 +47,7 @@ HEX = $(BUILDDIR)/launchpad_pro.hex
 HEXTOSYX = $(BUILDDIR)/hextosyx$(EXE)
 SIMULATOR = $(BUILDDIR)/simulator$(EXE)
 TEST_BIN = $(BUILDDIR)/tests/run_tests$(EXE)
-TEST_CI_OBJECT = $(BUILDDIR)/tests/responder.o $(BUILDDIR)/tests/pe_session.o
+TEST_CI_OBJECT = $(BUILDDIR)/tests/responder.o $(BUILDDIR)/tests/pe_session.o $(BUILDDIR)/tests/initiator.o
 
 # host unit tests: later tasks append their files to TEST_SOURCES
 TEST_SOURCES += tests/run_tests.c tests/test_harness.c
@@ -68,6 +68,7 @@ TEST_SOURCES += tests/test_pads.c
 TEST_SOURCES += tests/test_twostage.c src/pads/twostage.c
 TEST_SOURCES += tests/test_midici.c src/midici/midici.c src/midici/ci_queue.c
 TEST_SOURCES += tests/test_ci_pe.c src/midici/ci_json.c src/midici/ci_pe.c
+TEST_SOURCES += tests/test_midici_initiator.c
 GOLDEN_DESC = $(BUILDDIR)/tests/golden_usb_desc_rodata.bin
 CI_HEADERS = $(wildcard src/midici/*.h src/midici/vendor/*.h)
 TEST_CFLAGS = -std=c99 -Wall -Werror $(HOST_PLATFORM_CFLAGS) -DHOST_TEST -Iinclude -Isrc -Itests -DGOLDEN_DESC=\"$(GOLDEN_DESC)\"

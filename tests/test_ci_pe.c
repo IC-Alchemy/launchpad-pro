@@ -156,7 +156,10 @@ static void test_pe_fixed_resources(void)
 	n = render(CI_PE_DEVICE_INFO, &s, "0123456789ABCDEF01234567", buf, sizeof buf);
 	CHECK(strstr(buf, "\"manufacturerId\":[0,32,41]") != 0);
 	CHECK(strstr(buf, "\"manufacturer\":\"Novation\"") != 0);
+	CHECK(strstr(buf, "\"familyId\":[81,0]") != 0);
+	CHECK(strstr(buf, "\"modelId\":[0,0]") != 0);
 	CHECK(strstr(buf, "\"model\":\"Launchpad Pro MIDI 2.0\"") != 0);
+	CHECK(strstr(buf, "\"versionId\":[0,1,0,0]") != 0);
 	CHECK(strstr(buf, "\"serialNumber\":\"0123456789ABCDEF01234567\"") != 0);
 	render(CI_PE_DEVICE_INFO, &s, "", buf, sizeof buf);
 	CHECK(strstr(buf, "serialNumber") == 0);
@@ -349,10 +352,82 @@ static void test_pe_changed(void)
 	         CI_PE_BIT(CI_PE_PLAY_OPTIONS) | CI_PE_BIT(CI_PE_CHANNEL_LIST) | CI_PE_BIT(CI_PE_SCALE_SETTINGS));
 }
 
+static void test_json_pe_header_resource(void)
+{
+	struct ci_json_it it;
+	struct ci_json_member m;
+	int r, found;
+	uint8_t res;
+
+	/* Standard PE request header */
+	static const char STD[] = "{\"mutualEncoding\":\"ASCII\",\"resource\":\"DeviceInfo\",\"setPartial\":false}";
+	ci_json_it_init(&it, STD, (uint16_t)(sizeof STD - 1));
+	found = 0;
+	res = CI_PE_NONE;
+	while ((r = ci_json_next(&it, &m)) == 1) {
+		if (ci_json_key_is(&m, "resource")) {
+			found++;
+			CHECK_EQ(m.type, CI_JSON_STR);
+			CHECK(ci_json_str_is(&m, "DeviceInfo"));
+			res = ci_pe_lookup(m.str, m.str_len);
+		}
+	}
+	CHECK_EQ(r, 0);
+	CHECK_EQ(found, 1);
+	CHECK_EQ(res, CI_PE_DEVICE_INFO);
+
+	/* Nested "resource" inside another object is skipped; top-level wins */
+	static const char NESTED[] = "{\"meta\":{\"resource\":\"DeviceInfo\"},\"resource\":\"X-ScaleSettings\"}";
+	ci_json_it_init(&it, NESTED, (uint16_t)(sizeof NESTED - 1));
+	found = 0;
+	res = CI_PE_NONE;
+	while ((r = ci_json_next(&it, &m)) == 1) {
+		if (ci_json_key_is(&m, "resource")) {
+			found++;
+			CHECK_EQ(m.type, CI_JSON_STR);
+			res = ci_pe_lookup(m.str, m.str_len);
+		}
+	}
+	CHECK_EQ(r, 0);
+	CHECK_EQ(found, 1);
+	CHECK_EQ(res, CI_PE_SCALE_SETTINGS);
+
+	/* Non-string "resource" values are not treated as CI_JSON_STR */
+	static const char *const NON_STR[] = {
+		"{\"resource\":123}",
+		"{\"resource\":null}",
+		"{\"resource\":[\"DeviceInfo\"]}",
+	};
+	for (unsigned i = 0; i < sizeof NON_STR / sizeof NON_STR[0]; i++) {
+		ci_json_it_init(&it, NON_STR[i], (uint16_t)strlen(NON_STR[i]));
+		found = 0;
+		while ((r = ci_json_next(&it, &m)) == 1) {
+			if (ci_json_key_is(&m, "resource")) {
+				found++;
+				CHECK(m.type != CI_JSON_STR);
+			}
+		}
+		CHECK_EQ(r, 0);
+		CHECK_EQ(found, 1);
+	}
+
+	/* Missing "resource" */
+	static const char MISSING[] = "{\"command\":\"start\",\"mutualEncoding\":\"ASCII\"}";
+	ci_json_it_init(&it, MISSING, (uint16_t)(sizeof MISSING - 1));
+	found = 0;
+	while ((r = ci_json_next(&it, &m)) == 1) {
+		if (ci_json_key_is(&m, "resource"))
+			found++;
+	}
+	CHECK_EQ(r, 0);
+	CHECK_EQ(found, 0);
+}
+
 void test_ci_pe_all(void)
 {
 	RUN(test_json_writer_window);
 	RUN(test_json_reader);
+	RUN(test_json_pe_header_resource);
 	RUN(test_pe_lookup);
 	RUN(test_pe_fixed_resources);
 	RUN(test_pe_settings_round_trip);

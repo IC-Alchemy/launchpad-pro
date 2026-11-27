@@ -6,8 +6,8 @@
 
 /* The instrument's user interface: the play page (grid pads to the pad
  * engine, octave and root arrows), the Setup menu (tap toggles, hold peeks)
- * with its Scale and Options pages, and every LED. It owns the settings.
- * Runs only from the main loop: not reentrant.
+ * with its Scale, Options, Tuning, and MIDI-CI pages, and every LED. It owns
+ * the settings. Runs only from the main loop: not reentrant.
  *
  * The caller runs pe_init(adc_buffer, ui_on_sounding) before ui_init. */
 
@@ -20,7 +20,8 @@ void ui_init(uint32_t now);
 void ui_pad(uint8_t index, uint8_t value, uint32_t now);
 /* TYPESETUP events: value 0 = release */
 void ui_setup(uint8_t value, uint32_t now);
-/* pe_poll, Setup LED every 100 ms, settings_poll; every main loop pass.
+/* pe_poll, Setup LED every 100 ms, MIDI-CI peer LED refresh, settings_poll;
+ * every main loop pass.
  * The settings save (a flash page erase that stalls the device) also waits
  * until no note sounds and, on the play page, no grid pad was pressed or
  * released for SETTINGS_SAVE_QUIET_MS. */
