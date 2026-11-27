@@ -651,7 +651,7 @@ static void test_ci_pe_surface_settings(void)
 	id = pe_subscribe(PE_ME, 2, "X-SurfaceSettings");
 	CHECK(id != 0);
 	{
-		const char *set = "{\"split\":true,\"upperPalette\":\"glacier\",\"upperChannel\":5}";
+		const char *set = "{\"splitMode\":\"y\",\"upperPalette\":\"glacier\",\"upperChannel\":5}";
 
 		pe_send_from(PE_OTHER, 0x36, 3, "{\"resource\":\"X-SurfaceSettings\"}", 1, 1, set,
 		             (uint16_t)strlen(set));
@@ -660,21 +660,21 @@ static void test_ci_pe_surface_settings(void)
 	CHECK(pe_count >= 2);
 	CHECK_EQ(pe_rx[0].buf[4], 0x37);
 	CHECK_EQ(fake_applies, 1);
-	CHECK_EQ(fake_s.split, 1);
+	CHECK_EQ(fake_s.split_mode, SPLIT_Y);
 	CHECK_EQ(fake_s.upper_palette, PALETTE_GLACIER);
 	CHECK_EQ(fake_s.upper_channel, 4);
 	CHECK_EQ(pe_rx[1].buf[4], 0x38);
 	CHECK_MEM(pe_rx[1].buf + 10, PE_ME, 4);
 
 	/* a palette change on the device notifies too */
-	fake_s.palette = PALETTE_FOREST;
+	fake_s.palette = PALETTE_CITRUS;
 	pe_expect_notify(PE_ME, id, CI_PE_SURFACE_SETTINGS);
 
 	/* the ChannelList now lists both halves */
 	pe_send(0x34, 4, "{\"resource\":\"ChannelList\"}", "");
 	host_in_pe();
 	n = pe_reply(0x35, 4, PE_ME, 320, hdr, body, sizeof body);
-	CHECK(strstr(body, "\"Standalone Upper\",\"channel\":5") != 0);
+	CHECK(strstr(body, "\"Standalone Right\",\"channel\":5") != 0);
 }
 
 static void test_ci_pe_subscribe(void)

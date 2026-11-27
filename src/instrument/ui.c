@@ -23,8 +23,12 @@
 
 enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING, PAGE_SURFACE };
 
-/* first row of the upper half of a split surface */
-#define SPLIT_ROW 5
+/* Round buttons on the left, numbered from the bottom of the device. */
+#define BTN_SPLIT_X   80
+#define BTN_SPLIT_Y   70
+#define BTN_SPLIT_OFF 60
+#define BTN_PALETTE_FIRST 50
+#define BTN_PALETTE_LAST  (BTN_PALETTE_FIRST - (PALETTE_COUNT - 1) * 10)
 
 /* menu item colour families, each dim (index 0) and bright (index 1) */
 enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING,
@@ -75,9 +79,8 @@ static const uint16_t A4_PRESET[4] = {4150, 4320, 4400, 4420};
  * top, the lower half's below):
  *   row 8     upper palette (one pad per palette)
  *   rows 7, 6 upper channel 1..8, 9..16
- *   rows 5, 4 previews of the upper and lower palettes on columns 1..7 (a
- *             major scale from the root: root, 2, 3rd, 4, 5th, 6, 7), and
- *             the split toggle on column 8 of both rows, at the seam
+ *   rows 5, 4 previews of the upper/right and lower/left palettes on
+ *             columns 1..7 (root, 2, 3rd, 4, 5th, 6, 7)
  *   rows 3, 2 lower channel 1..8, 9..16 (the Options page's channel)
  *   row 1     lower palette (the whole grid when split is off) */
 static const uint8_t PREVIEW_ROLE[7] = {
@@ -122,27 +125,29 @@ static void ctx(struct scale_ctx *c)
 	c->tuning = g_s.tuning;
 }
 
-/* grid pad i is in the upper half of a split surface */
-static uint8_t is_upper(uint8_t i)
+/* The second zone is above the X seam or right of the Y seam. */
+static uint8_t in_second_zone(uint8_t i)
 {
-	return g_s.split && i / 10 >= SPLIT_ROW;
+	if (g_s.split_mode == SPLIT_X)
+		return i / 10 >= 5;
+	return g_s.split_mode == SPLIT_Y && i % 10 >= 5;
 }
 
 static uint8_t pad_channel(uint8_t i)
 {
-	return is_upper(i) ? g_s.upper_channel : g_s.channel;
+	return in_second_zone(i) ? g_s.upper_channel : g_s.channel;
 }
 
 static uint8_t pad_palette(uint8_t i)
 {
-	return is_upper(i) ? g_s.upper_palette : g_s.palette;
+	return in_second_zone(i) ? g_s.upper_palette : g_s.palette;
 }
 
 /* Lanes keep the halves' sounding pads apart when they play on different
  * channels; on one channel the halves share notes, so they share a lane. */
 static uint8_t lane_of_channel(uint8_t ch)
 {
-	return g_s.split && ch == g_s.upper_channel && ch != g_s.channel;
+	return g_s.split_mode != SPLIT_OFF && ch == g_s.upper_channel && ch != g_s.channel;
 }
 
 static uint8_t lane_of_pad(uint8_t i)
@@ -204,7 +209,7 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 			return 0;
 		}
 	} else if (g_page == PAGE_SURFACE) {
-		if (r == 8 || r == 1) {
+		if ((r == 8 || r == 1) && c < PALETTE_COUNT) {
 			it->field = r == 8 ? &g_s.upper_palette : &g_s.palette;
 			it->value = c;
 			it->kind = K_PALETTE;
@@ -216,13 +221,8 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 			it->field = &g_s.channel;
 			it->value = (uint8_t)((r == 2 ? 8 : 0) + c);
 			it->kind = K_ROUTING;
-		} else if (c == 7) {
-			it->field = &g_s.split;
-			it->value = 1;
-			it->kind = K_LAYOUT;
-			it->toggle = 1;
 		} else {
-			return 0; /* a preview pad */
+			return 0;
 		}
 	} else if (g_page == PAGE_TUNING) {
 		uint8_t at = (uint8_t)((8 - r) * 8 + c);
@@ -294,6 +294,26 @@ static const uint8_t *palette_item(uint8_t palette, uint8_t chosen)
 	return dim;
 }
 
+/* Shared by the play and Surface pages. Palette buttons edit the primary zone. */
+static uint8_t surface_button(uint8_t i, struct item *it)
+{
+	if (g_menu && g_page != PAGE_SURFACE)
+		return 0;
+	it->toggle = 0;
+	if (i == BTN_SPLIT_X || i == BTN_SPLIT_Y || i == BTN_SPLIT_OFF) {
+		it->field = &g_s.split_mode;
+		it->value = i == BTN_SPLIT_X ? SPLIT_X : i == BTN_SPLIT_Y ? SPLIT_Y : SPLIT_OFF;
+		it->kind = K_LAYOUT;
+	} else if (i >= BTN_PALETTE_LAST && i <= BTN_PALETTE_FIRST && i % 10 == 0) {
+		it->field = &g_s.palette;
+		it->value = (uint8_t)((BTN_PALETTE_FIRST - i) / 10);
+		it->kind = K_PALETTE;
+	} else {
+		return 0;
+	}
+	return 1;
+}
+
 #define A4_NONE (-1)
 #define A4_STEP_PAD (-2)
 
@@ -314,9 +334,14 @@ static int8_t a4_pad(uint8_t i)
 
 static const uint8_t *colour(uint8_t i)
 {
-	if (g_menu) {
-		struct item it;
+	struct item it;
 
+	if (surface_button(i, &it)) {
+		if (it.kind == K_PALETTE)
+			return palette_item(it.value, *it.field == it.value);
+		return ITEM_RGB[it.kind][*it.field == it.value];
+	}
+	if (g_menu) {
 		if (is_grid(i)) {
 			int8_t a4 = a4_pad(i);
 
@@ -325,7 +350,7 @@ static const uint8_t *colour(uint8_t i)
 			if (a4 == A4_STEP_PAD)
 				return ITEM_RGB[K_A4][0];
 			if (!menu_item(i, &it)) {
-				if (g_page == PAGE_SURFACE && i % 10 <= 7)
+				if (g_page == PAGE_SURFACE && (i / 10 == 4 || i / 10 == 5) && i % 10 <= 7)
 					return palette_rgb(i / 10 == 5 ? g_s.upper_palette : g_s.palette,
 					                   (enum role)PREVIEW_ROLE[i % 10 - 1]);
 				return RGB_OFF;
@@ -496,6 +521,18 @@ static void menu_pad(uint8_t i, uint32_t now)
 
 void ui_pad(uint8_t index, uint8_t value, uint32_t now)
 {
+	struct item it;
+
+	if (value && surface_button(index, &it)) {
+		if (*it.field != it.value) {
+			if (it.field == &g_s.split_mode)
+				pe_release_all();
+			*it.field = it.value;
+			draw_all();
+			settings_touch(now);
+		}
+		return;
+	}
 	if (g_menu) {
 		if (value)
 			menu_pad(index, now);

@@ -28,8 +28,8 @@ void settings_defaults(struct settings *s)
 	s->tuning = TUNING_DEFAULT_ID;
 	s->a4_tenths = A4_TENTHS_DEFAULT;
 	s->palette = PALETTE_OCEAN;
-	s->split = 0;
-	s->upper_palette = PALETTE_EMBER;
+	s->split_mode = SPLIT_OFF;
+	s->upper_palette = PALETTE_CONTRAST;
 	s->upper_channel = 1;
 }
 
@@ -52,7 +52,7 @@ uint8_t settings_valid(const struct settings *s)
 	       s->velocity_curve < 3 && s->pressure_mode < 3 &&
 	       s->pressure_threshold < THRESH_COUNT && s->channel < 16 &&
 	       s->pressure_smoothing < 4 && s->palette < PALETTE_COUNT &&
-	       s->split <= 1 && s->upper_palette < PALETTE_COUNT && s->upper_channel < 16;
+	       s->split_mode < SPLIT_COUNT && s->upper_palette < PALETTE_COUNT && s->upper_channel < 16;
 }
 
 static void to_bytes(const struct settings *s, uint8_t *b)
@@ -73,7 +73,7 @@ static void to_bytes(const struct settings *s, uint8_t *b)
 	b[13] = (uint8_t)(s->a4_tenths & 0xFF);
 	b[14] = (uint8_t)(s->a4_tenths >> 8);
 	b[15] = s->palette;
-	b[16] = s->split;
+	b[16] = s->split_mode;
 	b[17] = s->upper_palette;
 	b[18] = s->upper_channel;
 }
@@ -87,7 +87,7 @@ void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
 	out[1] = 'P';
 	out[2] = 'M';
 	out[3] = '2';
-	out[4] = 4;
+	out[4] = 5;
 	to_bytes(s, out + 5);
 	for (i = 0; i < SETTINGS_RECORD_LEN - 1; i++)
 		sum = (uint8_t)(sum + out[i]);
@@ -102,7 +102,7 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 
 	if (in[0] != 'L' || in[1] != 'P' || in[2] != 'M' || in[3] != '2')
 		return 0;
-	if (in[4] == 4)
+	if (in[4] == 5 || in[4] == 4)
 		len = SETTINGS_RECORD_LEN;
 	else if (in[4] == 3)
 		len = SETTINGS_RECORD_V3_LEN;
@@ -133,9 +133,23 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 		t.tuning = in[17];
 		t.a4_tenths = (uint16_t)(in[18] | (in[19] << 8));
 	}
-	if (len == SETTINGS_RECORD_LEN) {
+	if (in[4] == 4) {
+		static const uint8_t v4_palette[] = {
+			PALETTE_OCEAN, PALETTE_COUNT, PALETTE_COUNT, PALETTE_COUNT,
+			PALETTE_CITRUS, PALETTE_GLACIER, PALETTE_COUNT, PALETTE_CONTRAST,
+		};
+
+		if (in[20] >= sizeof v4_palette || in[21] > 1 || in[22] >= sizeof v4_palette)
+			return 0;
+		if (v4_palette[in[20]] != PALETTE_COUNT)
+			t.palette = v4_palette[in[20]];
+		if (v4_palette[in[22]] != PALETTE_COUNT)
+			t.upper_palette = v4_palette[in[22]];
+		t.split_mode = in[21] ? SPLIT_X : SPLIT_OFF;
+		t.upper_channel = in[23];
+	} else if (in[4] == 5) {
 		t.palette = in[20];
-		t.split = in[21];
+		t.split_mode = in[21];
 		t.upper_palette = in[22];
 		t.upper_channel = in[23];
 	}

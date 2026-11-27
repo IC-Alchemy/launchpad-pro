@@ -20,24 +20,19 @@
  *   - Scale: a faint tint of the root's hue, so the scale reads as one.
  *   - Out of scale: a faint neutral grey, the same in every palette.
  *   - No role is white or near white: white means "sounding".
- * Indexes are saved in the settings and named in X-SurfaceSettings: append
- * only. */
-#define PALETTE_COUNT 8
+ * Indexes are saved in the settings and named in X-SurfaceSettings. */
 
 enum {
 	PALETTE_OCEAN,
-	PALETTE_EMBER,
-	PALETTE_FOREST,
-	PALETTE_AMETHYST,
 	PALETTE_CITRUS,
 	PALETTE_GLACIER,
-	PALETTE_ROSE,
 	PALETTE_CONTRAST,
+	PALETTE_COUNT,
 };
 
 /* The colour of a role in a palette; an unknown palette reads as Ocean. */
 const uint8_t *palette_rgb(uint8_t palette, enum role r);
-/* Property Exchange name ("ocean", "ember", ...); "" for an unknown palette. */
+/* Property Exchange name ("ocean", "citrus", ...); "" for an unknown palette. */
 const char *palette_name(uint8_t palette);
 
 #endif

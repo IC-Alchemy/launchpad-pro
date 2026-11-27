@@ -19,7 +19,7 @@ Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launc
 | 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
 | 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
 | 2c | Intonation: Pico2Seq's 29 tunings (equal, just, historical temperaments, Indian, xenharmonic), 61 scales, Tuning page, A4 reference, MIDI 2.0 pitch attribute on notes | **Done and host-tested.** Hardware check pending (section 18 of `docs/checkpoint-2-instrument.md`). |
-| 2d | Eight colour palettes (root, 3rd and 5th each in their own colour) and the split surface (two halves, two palettes, two MIDI channels), all in Property Exchange too | **Done and host-tested.** Hardware check pending (section 19 of `docs/checkpoint-2-instrument.md`). |
+| 2d | Four colour palettes (root, 3rd and 5th each in their own colour) and the split surface (two halves, two palettes, two MIDI channels), all in Property Exchange too | **Done and host-tested.** Hardware check pending (section 19 of `docs/checkpoint-2-instrument.md`). |
 | 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery, Endpoint Inquiry and Property Exchange (Get, Set, Subscribe) implemented and host-tested.** Hardware check with MIDI2Sound pending. |
 | 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
 
@@ -30,20 +30,25 @@ The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash marg
 - **Play page.** The 8×8 grid is a scale keyboard. Default: C major, octave 4,
   layout "In-key 4ths", bottom-left pad = note 60. Buttons 91/92 change the
   octave, 93/94 change the root.
-- **Palettes.** Eight palettes: Ocean (the default), Ember, Forest, Amethyst,
-  Citrus, Glacier, Rose and Contrast. All follow the same rules, so a colour
-  means the same thing whatever the palette. Root and fifth are the bright
+- **Left round buttons.** From the top, 80 selects X, 70 selects Y, and 60
+  turns the split off. Buttons 50, 40, 30, and 20 select Ocean (blue), Citrus
+  (gold), Glacier (cyan), and Contrast (vermilion). The selected mode and
+  palette are brighter. The bottom button (10) is unused.
+- **Palettes.** Ocean is the default. Each colour role works the same way
+  across all four palettes. Root and fifth are the bright
   pair: the root in the palette's own hue (no other role uses it), the fifth
   in a neighbouring hue. The third is a dim contrasting hue. Other scale notes
   are a faint tint of the root's hue, out-of-scale notes a faint grey. A
   sounding pad is white. Lightness carries the meaning and hue backs it up,
   so the roles still read with colour blindness, and Contrast keeps to the
   orange/blue axis. Palette tables are in flash and use no RAM.
-- **Split.** With split on, rows 1–4 use the palette and the MIDI channel,
-  rows 5–8 their own palette and channel (default Ember on channel 2), so
-  each half can play a different instrument. Each pad keeps its note. A pitch
-  sounding in both halves is two notes, one per channel. Channel pressure is
-  sent per channel.
+- **Split.** X divides the grid between rows 4 and 5. Y divides it between
+  columns 4 and 5. The primary palette and MIDI channel apply to the whole
+  grid with Off selected, the lower half with X, or the left half with Y.
+  The other half uses its own palette and channel (Contrast on channel 2 by
+  default). Each pad keeps its pitch mapping. Changing the split releases
+  held notes. A pitch sounding in two halves on different channels sends one
+  note per channel. Channel pressure is sent per channel.
 - **Notes.** Pads send Note On/Off on the "Standalone Port" (UMP group 0) with
   16-bit velocity in the MIDI 2.0 Protocol and 7-bit velocity in the MIDI 1.0
   Protocol. Pads that share a pitch share one note.
@@ -65,9 +70,10 @@ The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash marg
   the Scale page (root, scale, octave, layout, absolute root), button 96 opens
   the Options page (velocity mode and curve, pressure mode and threshold, DIN
   mirror, MIDI channel), button 97 opens the Tuning page (tuning and A4),
-  button 98 opens the Surface page (palette, split, and each half's palette and
-  channel; its rows mirror the grid). Settings are saved to flash 2 s after the last change,
-  once no pad is being played.
+  button 98 opens the Surface page for setting and previewing each half's
+  palette and selecting its channel. The left round buttons also work on
+  that page. Settings are saved to flash 2 s after the last change, once no
+  pad is being played.
 - **DIN.** The "MIDI Port" (UMP group 1) is bridged to the DIN MIDI ports in
   both directions. With DIN mirror on, pad notes and pressure also go to DIN
   Out as MIDI 1.0.
@@ -108,12 +114,12 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 |---|---|---|---|---|
 | `ResourceList` | yes | | | The resources below, with JSON schemas for the two settings resources |
 | `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
-| `ChannelList` | yes | | | The Standalone Port and its MIDI channel; with split on, "Standalone Lower" and "Standalone Upper" with theirs |
+| `ChannelList` | yes | | | The Standalone Port and its MIDI channel. X lists "Standalone Lower" and "Standalone Upper". Y lists "Standalone Left" and "Standalone Right". |
 | `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 60), `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
 | `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
 | `X-ScaleList` | yes | | | The 61 scale names, in `scale` order |
 | `X-TuningList` | yes | | | The 29 tunings: `id`, `name`, `degrees`, and `scales` (the scales it offers, in menu order; left out for twelve-note tunings, which offer scales 0 to 30) |
-| `X-SurfaceSettings` | yes | full | yes | `palette` and `upperPalette` (`ocean`, `ember`, `forest`, `amethyst`, `citrus`, `glacier`, `rose`, `contrast`), `split` (boolean), `upperChannel` (1 to 16). The lower half's channel is `channel` in `X-PlayOptions` |
+| `X-SurfaceSettings` | yes | full | yes | `palette` and `upperPalette` (`ocean`, `citrus`, `glacier`, `contrast`), `splitMode` (`off`, `x`, `y`), `upperChannel` (1 to 16). The legacy `split` boolean is also accepted. The primary half's channel is `channel` in `X-PlayOptions` |
 
 A Set changes only the fields it gives and is applied like a change in the
 Setup menu (saved to flash 2 s later). One bad field rejects the whole Set with
