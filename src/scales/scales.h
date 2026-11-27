@@ -22,7 +22,9 @@ enum layout {
 	LAYOUT_COUNT
 };
 
-enum role { ROLE_OFF, ROLE_OUT, ROLE_SCALE, ROLE_HIGHLIGHT, ROLE_ROOT };
+/* Colour role of a pad: off (no note), out of the scale, a scale note, the
+ * scale's third and fifth steps, the root. */
+enum role { ROLE_OFF, ROLE_OUT, ROLE_SCALE, ROLE_THIRD, ROLE_FIFTH, ROLE_ROOT, ROLE_COUNT };
 
 struct scale_def {
 	const char *name;

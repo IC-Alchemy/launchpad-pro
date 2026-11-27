@@ -1,6 +1,7 @@
 #include "instrument/ui.h"
 #include "instrument/settings.h"
 #include "instrument/io.h"
+#include "instrument/palette.h"
 #include "pads/pad_engine.h"
 #include "scales/scales.h"
 #include "scales/tuning.h"
@@ -18,12 +19,19 @@
 #define BTN_SCALE    95
 #define BTN_OPTIONS  96
 #define BTN_TUNING   97
+#define BTN_SURFACE  98
 
-enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING };
+enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING, PAGE_SURFACE };
+
+/* first row of the upper half of a split surface */
+#define SPLIT_ROW 5
 
 /* menu item colour families, each dim (index 0) and bright (index 1) */
 enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING,
-       K_EQUAL, K_JUST, K_TEMPERAMENT, K_INDIAN, K_XENO, K_A4, K_KINDS };
+       K_EQUAL, K_JUST, K_TEMPERAMENT, K_INDIAN, K_XENO, K_A4, K_KINDS,
+       /* Surface page palette pads: lit in the palette's own root colour,
+        * not from ITEM_RGB */
+       K_PALETTE = K_KINDS };
 
 static const uint8_t ITEM_RGB[K_KINDS][2][3] = {
 	{{0, 8, 0}, {0, 63, 0}},       /* root keys: green */
@@ -42,14 +50,6 @@ static const uint8_t ITEM_RGB[K_KINDS][2][3] = {
 	{{8, 0, 6}, {63, 0, 44}},      /* Indian: magenta */
 	{{4, 0, 8}, {32, 0, 63}},      /* xenharmonic: violet */
 	{{6, 6, 6}, {63, 63, 63}},     /* A4: white */
-};
-
-static const uint8_t ROLE_RGB[5][3] = {
-	{0, 0, 0},     /* ROLE_OFF */
-	{4, 4, 4},     /* ROLE_OUT */
-	{0, 4, 16},    /* ROLE_SCALE */
-	{8, 24, 40},   /* ROLE_HIGHLIGHT */
-	{0, 20, 63},   /* ROLE_ROOT */
 };
 
 static const uint8_t RGB_OFF[3] = {0, 0, 0};
@@ -71,8 +71,23 @@ static const uint8_t LAYOUT_AT[5] = {
 static const int8_t A4_STEP[8] = {-10, -1, 0, 0, 0, 0, 1, 10};
 static const uint16_t A4_PRESET[4] = {4150, 4320, 4400, 4420};
 
+/* Surface page (rows mirror the play surface: the upper half's settings on
+ * top, the lower half's below):
+ *   row 8     upper palette (one pad per palette)
+ *   rows 7, 6 upper channel 1..8, 9..16
+ *   rows 5, 4 previews of the upper and lower palettes on columns 1..7 (a
+ *             major scale from the root: root, 2, 3rd, 4, 5th, 6, 7), and
+ *             the split toggle on column 8 of both rows, at the seam
+ *   rows 3, 2 lower channel 1..8, 9..16 (the Options page's channel)
+ *   row 1     lower palette (the whole grid when split is off) */
+static const uint8_t PREVIEW_ROLE[7] = {
+	ROLE_ROOT, ROLE_SCALE, ROLE_THIRD, ROLE_SCALE, ROLE_FIFTH, ROLE_SCALE, ROLE_SCALE,
+};
+
 static struct settings g_s;
-static uint8_t g_sounding[16];  /* bit per pitch: sounding on the engine */
+/* bit per pitch: sounding on the engine, per lane (1: the upper half of a
+ * split surface on its own channel, 0: everything else) */
+static uint8_t g_sounding[2][16];
 static uint32_t g_setup_t;      /* ms counter at the Setup press that opened the menu */
 static uint32_t g_led_t;        /* ms counter at the last Setup LED update */
 static uint8_t g_menu;          /* menu open */
@@ -107,9 +122,37 @@ static void ctx(struct scale_ctx *c)
 	c->tuning = g_s.tuning;
 }
 
-static uint8_t is_sounding(int16_t pitch)
+/* grid pad i is in the upper half of a split surface */
+static uint8_t is_upper(uint8_t i)
 {
-	return pitch >= 0 && pitch < 128 && (g_sounding[pitch >> 3] & (1u << (pitch & 7)));
+	return g_s.split && i / 10 >= SPLIT_ROW;
+}
+
+static uint8_t pad_channel(uint8_t i)
+{
+	return is_upper(i) ? g_s.upper_channel : g_s.channel;
+}
+
+static uint8_t pad_palette(uint8_t i)
+{
+	return is_upper(i) ? g_s.upper_palette : g_s.palette;
+}
+
+/* Lanes keep the halves' sounding pads apart when they play on different
+ * channels; on one channel the halves share notes, so they share a lane. */
+static uint8_t lane_of_channel(uint8_t ch)
+{
+	return g_s.split && ch == g_s.upper_channel && ch != g_s.channel;
+}
+
+static uint8_t lane_of_pad(uint8_t i)
+{
+	return lane_of_channel(pad_channel(i));
+}
+
+static uint8_t is_sounding(uint8_t lane, int16_t pitch)
+{
+	return pitch >= 0 && pitch < 128 && (g_sounding[lane][pitch >> 3] & (1u << (pitch & 7)));
 }
 
 static void configure(void)
@@ -160,6 +203,27 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 		} else {
 			return 0;
 		}
+	} else if (g_page == PAGE_SURFACE) {
+		if (r == 8 || r == 1) {
+			it->field = r == 8 ? &g_s.upper_palette : &g_s.palette;
+			it->value = c;
+			it->kind = K_PALETTE;
+		} else if (r == 7 || r == 6) {
+			it->field = &g_s.upper_channel;
+			it->value = (uint8_t)((r == 6 ? 8 : 0) + c);
+			it->kind = K_ROUTING;
+		} else if (r == 3 || r == 2) {
+			it->field = &g_s.channel;
+			it->value = (uint8_t)((r == 2 ? 8 : 0) + c);
+			it->kind = K_ROUTING;
+		} else if (c == 7) {
+			it->field = &g_s.split;
+			it->value = 1;
+			it->kind = K_LAYOUT;
+			it->toggle = 1;
+		} else {
+			return 0; /* a preview pad */
+		}
 	} else if (g_page == PAGE_TUNING) {
 		uint8_t at = (uint8_t)((8 - r) * 8 + c);
 
@@ -204,7 +268,30 @@ static uint8_t menu_item(uint8_t i, struct item *it)
 
 static uint8_t page_of(uint8_t button)
 {
-	return button == BTN_OPTIONS ? PAGE_OPTIONS : button == BTN_TUNING ? PAGE_TUNING : PAGE_SCALE;
+	return button == BTN_OPTIONS ? PAGE_OPTIONS
+	     : button == BTN_TUNING  ? PAGE_TUNING
+	     : button == BTN_SURFACE ? PAGE_SURFACE
+	     : PAGE_SCALE;
+}
+
+static uint8_t is_page_button(uint8_t i)
+{
+	return i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING || i == BTN_SURFACE;
+}
+
+/* A palette pad: its root colour, at an eighth of the brightness when it is
+ * not the one chosen (the menu's dim/bright convention). */
+static const uint8_t *palette_item(uint8_t palette, uint8_t chosen)
+{
+	static uint8_t dim[3];
+	const uint8_t *root = palette_rgb(palette, ROLE_ROOT);
+	uint8_t k;
+
+	if (chosen)
+		return root;
+	for (k = 0; k < 3; k++)
+		dim[k] = (uint8_t)((root[k] + 7) >> 3);
+	return dim;
 }
 
 #define A4_NONE (-1)
@@ -237,11 +324,17 @@ static const uint8_t *colour(uint8_t i)
 				return ITEM_RGB[K_A4][A4_PRESET[a4] == g_s.a4_tenths];
 			if (a4 == A4_STEP_PAD)
 				return ITEM_RGB[K_A4][0];
-			if (!menu_item(i, &it))
+			if (!menu_item(i, &it)) {
+				if (g_page == PAGE_SURFACE && i % 10 <= 7)
+					return palette_rgb(i / 10 == 5 ? g_s.upper_palette : g_s.palette,
+					                   (enum role)PREVIEW_ROLE[i % 10 - 1]);
 				return RGB_OFF;
+			}
+			if (it.kind == K_PALETTE)
+				return palette_item(it.value, *it.field == it.value);
 			return ITEM_RGB[it.kind][it.toggle ? *it.field != 0 : *it.field == it.value];
 		}
-		if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING)
+		if (is_page_button(i))
 			return page_of(i) == g_page ? RGB_WHITE : RGB_DIM_WHITE;
 		return RGB_OFF;
 	}
@@ -251,7 +344,8 @@ static const uint8_t *colour(uint8_t i)
 
 		ctx(&c);
 		pitch = scale_pad_pitch(&c, i);
-		return is_sounding(pitch) ? RGB_WHITE : ROLE_RGB[scale_pitch_role(&c, pitch)];
+		return is_sounding(lane_of_pad(i), pitch) ? RGB_WHITE
+		                                          : palette_rgb(pad_palette(i), scale_pitch_role(&c, pitch));
 	}
 	if (i >= BTN_OCT_UP && i <= BTN_ROOT_UP)
 		return RGB_DIM_WHITE;
@@ -283,23 +377,24 @@ static void draw_setup_led(void)
 		io_led(TYPESETUP, 0, 63, 20, 0);
 }
 
-void ui_on_sounding(uint8_t pitch, uint8_t on)
+void ui_on_sounding(uint8_t pitch, uint8_t ch, uint8_t on)
 {
 	struct scale_ctx c;
-	uint8_t r, col;
+	uint8_t r, col, lane = lane_of_channel(ch);
 
 	if (pitch > 127)
 		return;
 	if (on)
-		g_sounding[pitch >> 3] |= (uint8_t)(1u << (pitch & 7));
+		g_sounding[lane][pitch >> 3] |= (uint8_t)(1u << (pitch & 7));
 	else
-		g_sounding[pitch >> 3] &= (uint8_t)~(1u << (pitch & 7));
+		g_sounding[lane][pitch >> 3] &= (uint8_t)~(1u << (pitch & 7));
 	if (g_menu)
 		return;
 	ctx(&c);
 	for (r = 10; r <= 80; r += 10)
 		for (col = 1; col <= 8; col++)
-			if (scale_pad_pitch(&c, (uint8_t)(r + col)) == pitch)
+			if (lane_of_pad((uint8_t)(r + col)) == lane &&
+			    scale_pad_pitch(&c, (uint8_t)(r + col)) == pitch)
 				draw((uint8_t)(r + col));
 }
 
@@ -311,7 +406,7 @@ static int16_t pad_target(uint8_t pad, uint8_t *ch, uint8_t *din)
 	if (g_menu)
 		return -1;
 	ctx(&c);
-	*ch = g_s.channel;
+	*ch = pad_channel(pad);
 	*din = g_s.din_mirror;
 	return scale_pad_pitch(&c, pad);
 }
@@ -366,7 +461,7 @@ static void menu_pad(uint8_t i, uint32_t now)
 	struct item it;
 	uint8_t v;
 
-	if (i == BTN_SCALE || i == BTN_OPTIONS || i == BTN_TUNING) {
+	if (is_page_button(i)) {
 		g_page = page_of(i);
 		draw_all();
 		return;
@@ -412,7 +507,7 @@ void ui_pad(uint8_t index, uint8_t value, uint32_t now)
 			struct scale_ctx c;
 
 			ctx(&c);
-			pe_press(index, scale_pad_pitch(&c, index), g_s.channel, g_s.din_mirror, now);
+			pe_press(index, scale_pad_pitch(&c, index), pad_channel(index), g_s.din_mirror, now);
 		} else {
 			pe_release(index, now);
 		}

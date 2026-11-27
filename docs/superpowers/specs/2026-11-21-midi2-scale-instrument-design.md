@@ -503,7 +503,9 @@ scales and options from the PC.
   - `DeviceInfo`: manufacturer ID, family, model, version, and manufacturer /
     family / model / version strings. These must match the UMP Device
     Identity and Endpoint Name, so a DAW shows one consistent device.
-  - `ChannelList`: the one channel the instrument plays on, with a title.
+  - `ChannelList`: the one channel the instrument plays on, with a title;
+    with the split surface on, one entry per half ("Standalone Lower",
+    "Standalone Upper").
   - `X-ScaleSettings` (Get / Set / Subscribe): `root` 0–11, `scale` (index
     into `X-ScaleList`), `octave` 0–7, `layout` (enum string), and
     `absoluteRoot` (bool).
@@ -514,6 +516,11 @@ scales and options from the PC.
     `channel` (1–16).
   - `X-ScaleList`: the scale names in index order, read-only, so an editor
     can show names rather than numbers.
+  - `X-SurfaceSettings` (Get / Set / Subscribe, added in stage 2d):
+    `palette` and `upperPalette` (enum strings, `ocean` to `contrast`),
+    `split` (bool) and `upperChannel` (1–16). Kept apart from
+    `X-PlayOptions` so a full-object Set of either stays well under the
+    256-byte Set buffer.
 - **Set semantics:**
   - Full-object Set only. The fields given replace their values. Missing
     fields keep their current values, and unknown fields are ignored.

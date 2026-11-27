@@ -7,13 +7,15 @@
 
 /* sounding edges reported through pe_sounding_fn */
 static uint8_t rec_pitch[64];
+static uint8_t rec_ch[64];
 static uint8_t rec_on[64];
 static int rec_n;
 
-static void rec(uint8_t pitch, uint8_t sounding)
+static void rec(uint8_t pitch, uint8_t ch, uint8_t sounding)
 {
     if (rec_n < 64) {
         rec_pitch[rec_n] = pitch;
+        rec_ch[rec_n] = ch;
         rec_on[rec_n] = sounding;
         rec_n++;
     }

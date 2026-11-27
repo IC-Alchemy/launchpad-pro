@@ -89,11 +89,33 @@ static void test_out_of_range_is_minus1(void)
 static void test_roles(void)
 {
 	CHECK_EQ(scale_pitch_role(&DEF, 60), ROLE_ROOT);
-	CHECK_EQ(scale_pitch_role(&DEF, 64), ROLE_HIGHLIGHT);
-	CHECK_EQ(scale_pitch_role(&DEF, 67), ROLE_HIGHLIGHT);
+	CHECK_EQ(scale_pitch_role(&DEF, 64), ROLE_THIRD);
+	CHECK_EQ(scale_pitch_role(&DEF, 67), ROLE_FIFTH);
 	CHECK_EQ(scale_pitch_role(&DEF, 62), ROLE_SCALE);
 	CHECK_EQ(scale_pitch_role(&DEF, 61), ROLE_OUT);
 	CHECK_EQ(scale_pitch_role(&DEF, -1), ROLE_OFF);
+	/* every octave */
+	CHECK_EQ(scale_pitch_role(&DEF, 52), ROLE_THIRD);
+	CHECK_EQ(scale_pitch_role(&DEF, 79), ROLE_FIFTH);
+	CHECK_EQ(scale_pitch_role(&DEF, 72), ROLE_ROOT);
+}
+
+static void test_roles_follow_the_scale_steps(void)
+{
+	/* the third and fifth are the scale's third and fifth steps: minor
+	 * on A has C as its third, E as its fifth */
+	struct scale_ctx c = {9, 1, 4, LAYOUT_INKEY_4THS, 0, 0};
+	struct scale_ctx chrom = {0, SCALE_CHROMATIC, 4, LAYOUT_CHROM_4THS, 0, 0};
+
+	CHECK_EQ(scale_pitch_role(&c, 69), ROLE_ROOT);
+	CHECK_EQ(scale_pitch_role(&c, 72), ROLE_THIRD);
+	CHECK_EQ(scale_pitch_role(&c, 76), ROLE_FIFTH);
+	CHECK_EQ(scale_pitch_role(&c, 74), ROLE_SCALE);
+	CHECK_EQ(scale_pitch_role(&c, 73), ROLE_OUT);
+	/* chromatic has no third or fifth: only the root stands out */
+	CHECK_EQ(scale_pitch_role(&chrom, 60), ROLE_ROOT);
+	CHECK_EQ(scale_pitch_role(&chrom, 64), ROLE_SCALE);
+	CHECK_EQ(scale_pitch_role(&chrom, 67), ROLE_SCALE);
 }
 
 static void test_scale_table_sane(void)
@@ -131,5 +153,6 @@ void test_scales_all(void)
 	RUN(test_octave_positions);
 	RUN(test_out_of_range_is_minus1);
 	RUN(test_roles);
+	RUN(test_roles_follow_the_scale_steps);
 	RUN(test_scale_table_sane);
 }

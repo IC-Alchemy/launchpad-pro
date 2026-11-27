@@ -20,12 +20,18 @@ struct settings {
 	        pressure_threshold, din_mirror, channel, pressure_smoothing;
 	uint8_t tuning;      /* tuning id (scales/tuning.h); offers scale */
 	uint16_t a4_tenths;  /* reference pitch in 0.1 Hz, A4_TENTHS_MIN..MAX */
+	/* Play surface (X-SurfaceSettings). palette: the grid, or with split
+	 * on its lower half (rows 1..4, on channel). Split: the upper half (rows
+	 * 5..8) shows upper_palette and plays on upper_channel (0..15). */
+	uint8_t palette, split, upper_palette, upper_channel;
 };
 
 /* Record: 'LPM2', version, 12 one-byte fields, tuning, A4 (low byte first),
- * checksum. Version 2 (18 bytes) had no tuning or A4, version 1 (17 bytes)
- * no smoothing either; settings_load still accepts both. */
-#define SETTINGS_RECORD_LEN 21
+ * palette, split, upper palette, upper channel, checksum. Version 3 (21
+ * bytes) had no surface fields, version 2 (18 bytes) no tuning or A4 either,
+ * version 1 (17 bytes) no smoothing either; settings_load accepts them all. */
+#define SETTINGS_RECORD_LEN 25
+#define SETTINGS_RECORD_V3_LEN 21
 #define SETTINGS_RECORD_V2_LEN 18
 #define SETTINGS_RECORD_V1_LEN 17
 #define SETTINGS_SAVE_QUIET_MS 2000
@@ -37,8 +43,8 @@ uint8_t settings_scale_for(uint8_t tuning, uint8_t scale);
 uint8_t settings_valid(const struct settings *s);
 void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN]);
 /* 1 ok; 0 leaves *s untouched. Older records decode with the defaults for
- * the fields they lack (12-EDO at 440 Hz, light smoothing); the bytes past
- * their length are ignored. */
+ * the fields they lack (12-EDO at 440 Hz, light smoothing, Ocean, no split);
+ * the bytes past their length are ignored. */
 uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *s);
 /* flash offset 0; defaults on failure; remembers the result as "saved" */
 void settings_load(struct settings *s);

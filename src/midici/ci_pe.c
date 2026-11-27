@@ -6,16 +6,18 @@
 #include "midici/ci_identity.h"
 #include "scales/scales.h"
 #include "scales/tuning.h"
+#include "instrument/palette.h"
 
 /* The schemas below hard-code the ranges: keep them in step. */
 typedef char ci_pe_scale_count_is_61[(SCALE_COUNT == 61) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_thresh_count_is_4[(THRESH_COUNT == 4) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_a4_range[(A4_TENTHS_MIN == 4150 && A4_TENTHS_MAX == 4660) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_palette_count_is_8[(PALETTE_COUNT == 8) ? 1 : -1] __attribute__((unused));
 
 static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
 	"ResourceList", "DeviceInfo", "ChannelList", "X-ScaleSettings", "X-PlayOptions", "X-ScaleList",
-	"X-TuningList",
+	"X-TuningList", "X-SurfaceSettings",
 };
 
 /* Lives in flash. ResourceList does not list itself (Common Rules for PE).
@@ -51,7 +53,15 @@ static const char RESOURCE_LIST[] =
 	"{\"resource\":\"X-TuningList\",\"schema\":{\"title\":\"Tunings\",\"type\":\"array\","
 	"\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},"
 	"\"name\":{\"type\":\"string\"},\"degrees\":{\"type\":\"integer\"},"
-	"\"scales\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}}}}]";
+	"\"scales\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}}}},"
+	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"\"schema\":{\"title\":\"Surface\",\"type\":\"object\",\"properties\":{"
+	"\"palette\":{\"title\":\"Palette (lower half when split)\",\"type\":\"string\",\"enum\":["
+	"\"ocean\",\"ember\",\"forest\",\"amethyst\",\"citrus\",\"glacier\",\"rose\",\"contrast\"]},"
+	"\"split\":{\"title\":\"Split (rows 5-8 on their own palette and channel)\",\"type\":\"boolean\"},"
+	"\"upperPalette\":{\"title\":\"Upper palette\",\"type\":\"string\",\"enum\":["
+	"\"ocean\",\"ember\",\"forest\",\"amethyst\",\"citrus\",\"glacier\",\"rose\",\"contrast\"]},"
+	"\"upperChannel\":{\"title\":\"Upper MIDI channel\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}}]";
 
 /* Strings for the enum fields, indexed by the settings value. */
 static const char *const LAYOUTS[LAYOUT_COUNT] = {
@@ -85,7 +95,7 @@ const char *ci_pe_name(uint8_t res)
 
 uint8_t ci_pe_can_set(uint8_t res)
 {
-	return res == CI_PE_SCALE_SETTINGS || res == CI_PE_PLAY_OPTIONS;
+	return res == CI_PE_SCALE_SETTINGS || res == CI_PE_PLAY_OPTIONS || res == CI_PE_SURFACE_SETTINGS;
 }
 
 uint8_t ci_pe_can_subscribe(uint8_t res)
@@ -181,6 +191,11 @@ static void render_settings(uint8_t res, const struct settings *s, struct ci_jso
 		member_bool(o, "absoluteRoot", s->absolute_root);
 		member_int(o, "tuning", s->tuning, 1);
 		member_int(o, "a4Tenths", s->a4_tenths, 1);
+	} else if (res == CI_PE_SURFACE_SETTINGS) {
+		member_str(o, "palette", palette_name(s->palette), 0);
+		member_bool(o, "split", s->split);
+		member_str(o, "upperPalette", palette_name(s->upper_palette), 1);
+		member_int(o, "upperChannel", s->upper_channel + 1, 1);
 	} else {
 		member_str(o, "velocityMode", s->velocity_mode < 4 ? VEL_MODES[s->velocity_mode] : "", 0);
 		member_str(o, "velocityCurve", s->velocity_curve < 3 ? CURVES[s->velocity_curve] : "", 1);
@@ -238,13 +253,20 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 		device_info(o, piid);
 		break;
 	case CI_PE_CHANNEL_LIST:
+		/* split: one entry per half, lower first */
 		ci_json_raw(o, "[{");
-		member_str(o, "title", "Standalone Port", 0);
+		member_str(o, "title", s->split ? "Standalone Lower" : "Standalone Port", 0);
 		member_int(o, "channel", s->channel + 1, 1);
+		if (s->split) {
+			ci_json_raw(o, "},{");
+			member_str(o, "title", "Standalone Upper", 0);
+			member_int(o, "channel", s->upper_channel + 1, 1);
+		}
 		ci_json_raw(o, "}]");
 		break;
 	case CI_PE_SCALE_SETTINGS:
 	case CI_PE_PLAY_OPTIONS:
+	case CI_PE_SURFACE_SETTINGS:
 		render_settings(res, s, o);
 		break;
 	case CI_PE_SCALE_LIST:
@@ -319,6 +341,20 @@ static uint8_t set_enum(const struct ci_json_member *m, const char *const *table
 	return 1;
 }
 
+/* a palette by its palette_name() */
+static uint8_t set_palette(const struct ci_json_member *m, uint8_t *field)
+{
+	uint8_t i;
+	if (m->type != CI_JSON_STR)
+		return 0;
+	for (i = 0; i < PALETTE_COUNT; i++)
+		if (ci_json_str_is(m, palette_name(i))) {
+			*field = i;
+			return 1;
+		}
+	return 0;
+}
+
 uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s)
 {
 	struct settings t = *s;
@@ -347,6 +383,15 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 				ok = set_enum(&m, LAYOUTS, LAYOUT_COUNT, &t.layout);
 			else if (ci_json_key_is(&m, "absoluteRoot"))
 				ok = set_bool(&m, &t.absolute_root);
+		} else if (res == CI_PE_SURFACE_SETTINGS) {
+			if (ci_json_key_is(&m, "palette"))
+				ok = set_palette(&m, &t.palette);
+			else if (ci_json_key_is(&m, "split"))
+				ok = set_bool(&m, &t.split);
+			else if (ci_json_key_is(&m, "upperPalette"))
+				ok = set_palette(&m, &t.upper_palette);
+			else if (ci_json_key_is(&m, "upperChannel"))
+				ok = set_int(&m, 1, 16, -1, &t.upper_channel);
 		} else {
 			if (ci_json_key_is(&m, "velocityMode"))
 				ok = set_enum(&m, VEL_MODES, 4, &t.velocity_mode);
@@ -390,7 +435,11 @@ uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
 	    a->pressure_smoothing != b->pressure_smoothing || a->din_mirror != b->din_mirror ||
 	    a->channel != b->channel)
 		bits |= CI_PE_BIT(CI_PE_PLAY_OPTIONS);
-	if (a->channel != b->channel)
+	if (a->palette != b->palette || a->split != b->split ||
+	    a->upper_palette != b->upper_palette || a->upper_channel != b->upper_channel)
+		bits |= CI_PE_BIT(CI_PE_SURFACE_SETTINGS);
+	if (a->channel != b->channel || a->split != b->split ||
+	    (a->split && a->upper_channel != b->upper_channel))
 		bits |= CI_PE_BIT(CI_PE_CHANNEL_LIST);
 	return bits;
 }
