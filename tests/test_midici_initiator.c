@@ -77,8 +77,9 @@ static uint16_t host_in_words(uint32_t out[16])
 
 static void host_out_sysex(uint8_t group, const uint8_t *data, uint16_t len)
 {
-	uint32_t words[UMP_RX_WORDS];
-	uint16_t count = ump_sysex7_pack(words, UMP_RX_WORDS, group, data, len);
+	/* Store the full message here, then feed it one USB transfer at a time. */
+	uint32_t words[2 * ((CI_REASSEMBLY_BYTES + 5) / 6)];
+	uint16_t count = ump_sysex7_pack(words, sizeof(words) / sizeof(words[0]), group, data, len);
 	CHECK(count != 0);
 	for (uint16_t i = 0; i < count; i += 16) {
 		uint16_t rem = (uint16_t)(count - i);
@@ -165,6 +166,112 @@ static uint16_t build_pe_get_reply(uint8_t *buf, uint32_t src, uint32_t dst, uin
 		n += dlen;
 	}
 	return n;
+}
+
+static void send_profile_reply(uint8_t group, uint8_t scope, uint8_t version,
+                               uint32_t src, uint32_t dst, uint8_t enabled, uint8_t disabled)
+{
+	uint8_t msg[CI_REASSEMBLY_BYTES + 2] = {0xF0, 0x7E, scope, 0x0D, 0x21, version};
+	write_muid(msg + 6, src);
+	write_muid(msg + 10, dst);
+	uint16_t n = 14;
+	const uint8_t counts[] = {enabled, disabled};
+	for (unsigned list = 0; list < sizeof(counts); list++) {
+		msg[n++] = counts[list];
+		msg[n++] = 0;
+		for (uint8_t i = 0; i < counts[list]; i++) {
+			const uint8_t id[] = {0x00, 0x20, 0x33, (uint8_t)list, i};
+			memcpy(msg + n, id, sizeof(id));
+			n += sizeof(id);
+		}
+	}
+	msg[n++] = 0xF7;
+	host_out_sysex(group, msg, n);
+}
+
+static void test_profile_inquiry_waits_for_function_block_reply(void)
+{
+	const uint32_t peer_muid = 0x00345678u;
+	uint8_t msg[64];
+	ci_peer_info_t peer;
+
+	init_alt1();
+	midici_initiator_start_discovery(100);
+	const uint32_t my_muid = midici_muid();
+	drain_ci_from_device();
+	uint16_t n = build_discovery_reply(msg, peer_muid, my_muid, 2, 0x04, 512, 0);
+	CHECK(midici_initiator_on_message(0, msg, n, 101));
+	midici_initiator_tick(102); /* Endpoint Inquiry */
+	drain_ci_from_device();
+
+	/* An unsolicited reply before the inquiry leaves the queue cannot complete it. */
+	send_profile_reply(0, 0x7F, 2, peer_muid, my_muid, 1, 0);
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.flags & CI_PEER_FLAG_PROFILES, 0);
+	midici_initiator_tick(103);
+	drain_ci_from_device();
+	CHECK_EQ(g_ci_count, 1);
+	CHECK_EQ(g_ci_msgs[0].buf[2], 0x7F);
+	CHECK_EQ(g_ci_msgs[0].buf[4], 0x20);
+	CHECK_EQ(read_muid(g_ci_msgs[0].buf + 10), peer_muid);
+
+	const uint8_t endpoint[] = {0x7E, 0x7F, 0x0D, 0x73, 2,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 'P'};
+	memcpy(msg, endpoint, sizeof(endpoint));
+	write_muid(msg + 5, peer_muid);
+	write_muid(msg + 9, my_muid);
+	CHECK(midici_initiator_on_message(0, msg, sizeof(endpoint), 104));
+	send_profile_reply(0, 0x00, 2, peer_muid, my_muid, 99, 0); /* 512-byte payload */
+	send_profile_reply(0, 0x00, 2, peer_muid, my_muid, 99, 0); /* duplicate scope */
+	send_profile_reply(0, 0x0F, 2, peer_muid, my_muid, 99, 0);
+	send_profile_reply(0, 0x7E, 2, peer_muid, my_muid, 98, 1);
+	send_profile_reply(1, 0x7F, 2, peer_muid, my_muid, 0, 0); /* MIDI Port */
+	send_profile_reply(0, 0x7F, 0x22, peer_muid, my_muid, 0, 0); /* reserved version bits */
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.flags & (CI_PEER_FLAG_PROFILES | CI_PEER_FLAG_COMPLETE), 0);
+
+	send_profile_reply(0, 0x7F, 2, peer_muid, my_muid, 0, 0);
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.flags, CI_PEER_FLAG_DISCOVERED | CI_PEER_FLAG_ENDPOINT |
+	                     CI_PEER_FLAG_PROFILES | CI_PEER_FLAG_COMPLETE);
+	CHECK_EQ(peer.profiles_enabled, 296);
+	CHECK_EQ(peer.profiles_disabled, 1);
+
+	/* A duplicate terminal reply cannot replace the completed snapshot. */
+	send_profile_reply(0, 0x7F, 2, peer_muid, my_muid, 1, 1);
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.profiles_enabled, 296);
+	CHECK_EQ(peer.profiles_disabled, 1);
+}
+
+static void test_profile_inquiry_times_out_without_final_reply(void)
+{
+	const uint32_t peer_muid = 0x00345678u;
+	uint8_t msg[64];
+	ci_peer_info_t peer;
+
+	init_alt1();
+	midici_initiator_start_discovery(100);
+	drain_ci_from_device();
+	const uint32_t my_muid = midici_muid();
+	const uint16_t n = build_discovery_reply(msg, peer_muid, my_muid, 2, 0x04, 512, 0);
+	CHECK(midici_initiator_on_message(0, msg, n, 101));
+	midici_initiator_tick(102);
+	midici_initiator_tick(103);
+	drain_ci_from_device();
+
+	midici_initiator_tick(200);
+	send_profile_reply(0, 3, 2, peer_muid, my_muid, 1, 0);
+	midici_initiator_tick(3199);
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.flags, CI_PEER_FLAG_DISCOVERED);
+	midici_initiator_tick(3200);
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.flags, CI_PEER_FLAG_DISCOVERED | CI_PEER_FLAG_NAK);
+	send_profile_reply(0, 0x7F, 2, peer_muid, my_muid, 0, 0);
+	CHECK(midici_initiator_get_peer(0, &peer));
+	CHECK_EQ(peer.flags & CI_PEER_FLAG_PROFILES, 0);
+	CHECK_EQ(peer.profiles_enabled, 0);
 }
 
 static void test_ump_negotiation_boot_trigger_and_reset(void)
@@ -1423,6 +1530,8 @@ void test_midici_initiator_all(void)
 {
 	RUN(test_ump_negotiation_boot_trigger_and_reset);
 	RUN(test_discovery_wire_format_and_followups);
+	RUN(test_profile_inquiry_waits_for_function_block_reply);
+	RUN(test_profile_inquiry_times_out_without_final_reply);
 	RUN(test_window_wraparound_and_backpressure);
 	RUN(test_pe_errors_nak_timeout_and_invalidate);
 	RUN(test_self_echo_and_loopback_discovery_vs_collision);

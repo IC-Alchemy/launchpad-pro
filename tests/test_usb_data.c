@@ -216,6 +216,44 @@ static void test_ci_nak_address_and_sysex_limit(void)
 	CHECK_EQ(reply.len, 0);
 }
 
+static void test_ci_unsupported_profile_request_nak_details(void)
+{
+	struct ump_sysex7_rx reply;
+	uint8_t request[] = {0xF0, 0x7E, 0x00, 0x0D, 0x22, 0x02, 1, 2, 3, 4,
+		0, 0, 0, 0, 0x7E, 1, 2, 3, 4, 1, 0, 0xF7};
+	const uint8_t types[] = {0x22, 0x23, 0x28};
+	const uint8_t scopes[] = {0x00, 0x7E, 0x7F};
+	enter_alt1();
+	ci_discover(&reply);
+	memcpy(request + 10, reply.buf + 6, 4);
+	for (unsigned i = 0; i < sizeof(types); i++) {
+		request[2] = scopes[i];
+		request[4] = types[i];
+		request[19] = (i == 0) ? 1 : 0;
+		if (types[i] == 0x28)
+			request[20] = 0xF7; /* Profile Details Inquiry has one target byte */
+		host_out_sysex(0, request, sizeof(request) - (types[i] == 0x28));
+		host_in_ci(&reply, 0);
+		CHECK_EQ(reply.len, 25);
+		CHECK_EQ(reply.buf[2], scopes[i]);
+		CHECK_EQ(reply.buf[4], 0x7F);
+		CHECK_EQ(reply.buf[5], 2);
+		CHECK_MEM(reply.buf + 6, request + 10, 4);
+		CHECK_MEM(reply.buf + 10, request + 6, 4);
+		CHECK_EQ(reply.buf[14], types[i]);
+		CHECK_EQ(reply.buf[15], 0x01);
+		CHECK_MEM(reply.buf + 17, request + 14, 5);
+	}
+
+	/* Format 2 Set Profile On requires the two channel-count bytes. */
+	request[4] = 0x22;
+	request[19] = 0xF7;
+	host_out_sysex(0, request, 20);
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.buf[15], 0x41);
+	CHECK_MEM(reply.buf + 17, request + 14, 5);
+}
+
 static void test_ci_muid_replacement_and_collision(void)
 {
 	struct ump_sysex7_rx reply;
@@ -1971,6 +2009,7 @@ void test_usb_data_all(void)
 {
 	RUN(test_ci_discovery_endpoint_and_version);
 	RUN(test_ci_nak_address_and_sysex_limit);
+	RUN(test_ci_unsupported_profile_request_nak_details);
 	RUN(test_ci_muid_replacement_and_collision);
 	RUN(test_ci_reply_retries_and_is_discarded_on_alt_change);
 	RUN(test_ci_pe_capabilities_and_get);

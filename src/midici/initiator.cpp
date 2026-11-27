@@ -16,6 +16,7 @@ namespace {
 using T = ms::MessageType;
 
 constexpr uint8_t kStandaloneGroup = 0;
+constexpr uint32_t kProfileReplyTimeoutMs = 3000u;
 
 constexpr uint8_t TX_ENDPOINT = 0x01u;
 constexpr uint8_t TX_PROFILE  = 0x02u;
@@ -44,9 +45,17 @@ struct PendingGet {
 	uint8_t last_char;
 };
 
+struct ProfileInquiryProgress {
+	uint32_t last_reply_ms;
+	uint32_t seen_scopes; /* bits 0..15: channels, bit 16: group, bit 17: Function Block */
+	uint16_t enabled;
+	uint16_t disabled;
+};
+
 ci_peer_info_t peers[CI_INITIATOR_MAX_PEERS];
 uint8_t tx_pending[CI_INITIATOR_MAX_PEERS];
 uint8_t rx_pending[CI_INITIATOR_MAX_PEERS];
+ProfileInquiryProgress profile_progress[CI_INITIATOR_MAX_PEERS];
 char pe_rx_buf[256];
 PendingGet pe_get;
 
@@ -71,6 +80,7 @@ void reset_now()
 	memset(peers, 0, sizeof(peers));
 	memset(tx_pending, 0, sizeof(tx_pending));
 	memset(rx_pending, 0, sizeof(rx_pending));
+	memset(profile_progress, 0, sizeof(profile_progress));
 	pe_get = {};
 	window_start_ms = 0;
 	peer_count = 0;
@@ -162,11 +172,13 @@ void remove_peer(uint8_t idx)
 		peers[i] = peers[i + 1u];
 		tx_pending[i] = tx_pending[i + 1u];
 		rx_pending[i] = rx_pending[i + 1u];
+		profile_progress[i] = profile_progress[i + 1u];
 	}
 	peer_count--;
 	peers[peer_count] = {};
 	tx_pending[peer_count] = 0;
 	rx_pending[peer_count] = 0;
+	profile_progress[peer_count] = {};
 }
 
 size_t build_discovery_msg(uint8_t *buf, size_t cap, uint32_t my_muid)
@@ -243,6 +255,8 @@ bool try_send_followup(uint8_t idx, uint8_t bit)
 		return false;
 	if (midici_send_sysex(kStandaloneGroup, buf, static_cast<uint16_t>(n)) != 0)
 		return false;
+	if (bit == TX_PROFILE)
+		profile_progress[idx].last_reply_ms = last_now_ms;
 	tx_pending[idx] &= static_cast<uint8_t>(~bit);
 	return true;
 }
@@ -379,27 +393,44 @@ void handle_endpoint_reply(const ms::ParsedMessage &m, const uint8_t *payload)
 	update_complete(idx);
 }
 
-void handle_profile_reply(const ms::ParsedMessage &m)
+void finish_profile_inquiry(uint8_t idx)
 {
-	if (!m.HasProfileFields)
+	rx_pending[idx] &= static_cast<uint8_t>(~RX_PROFILE);
+	resolve_bare_naks(idx);
+	update_complete(idx);
+}
+
+void handle_profile_reply(const ms::ParsedMessage &m, uint32_t now_ms)
+{
+	if (!m.HasProfileFields || m.VersionFormat == 0u || (m.VersionFormat & 0x70u))
 		return;
 	const int idx_i = find_peer(m.SourceMuid);
 	if (idx_i < 0)
 		return;
 	const uint8_t idx = static_cast<uint8_t>(idx_i);
-	ci_peer_info_t &p = peers[idx];
+	if (!(in_flight_mask(idx) & RX_PROFILE))
+		return;
 
-	p.profiles_enabled = m.Profile.EnabledProfileCount > 255u
-		? 255u
-		: static_cast<uint8_t>(m.Profile.EnabledProfileCount);
-	p.profiles_disabled = m.Profile.DisabledProfileCount > 255u
-		? 255u
-		: static_cast<uint8_t>(m.Profile.DisabledProfileCount);
+	/* M2-102-U §2.4: a Function Block inquiry gets one reply per reported
+	 * channel and group, then a final 0x7F reply, even with empty lists. */
+	const bool final_reply = m.DeviceId == ms::DeviceIdFunctionBlock;
+	const uint8_t scope = m.DeviceId < 16u ? m.DeviceId : (final_reply ? 17u : 16u);
+	const uint32_t scope_bit = uint32_t{1} << scope;
+	ProfileInquiryProgress &progress = profile_progress[idx];
+	if (progress.seen_scopes & scope_bit)
+		return;
+	progress.seen_scopes |= scope_bit;
+	progress.last_reply_ms = now_ms;
+	progress.enabled += m.Profile.EnabledProfileCount;
+	progress.disabled += m.Profile.DisabledProfileCount;
 
-	p.flags |= CI_PEER_FLAG_PROFILES;
-	rx_pending[idx] &= static_cast<uint8_t>(~RX_PROFILE);
-	resolve_bare_naks(idx);
-	update_complete(idx);
+	if (final_reply) {
+		ci_peer_info_t &p = peers[idx];
+		p.profiles_enabled = progress.enabled;
+		p.profiles_disabled = progress.disabled;
+		p.flags |= CI_PEER_FLAG_PROFILES;
+		finish_profile_inquiry(idx);
+	}
 }
 
 void handle_pe_caps_reply(const ms::ParsedMessage &m, const uint8_t *payload, uint16_t len)
@@ -531,6 +562,10 @@ void handle_nak(const ms::ParsedMessage &m)
 	if (idx_i < 0)
 		return;
 	const uint8_t idx = static_cast<uint8_t>(idx_i);
+	if (m.HasAcknowledgmentFields &&
+	    m.Acknowledgment.OriginalMessageType == static_cast<uint8_t>(T::ProfileInquiry) &&
+	    (m.DeviceId != ms::DeviceIdFunctionBlock || !(in_flight_mask(idx) & RX_PROFILE)))
+		return;
 	peers[idx].flags |= CI_PEER_FLAG_NAK;
 
 	if (m.HasAcknowledgmentFields) {
@@ -587,6 +622,14 @@ void midici_initiator_tick(uint32_t now_ms)
 	last_now_ms = now_ms;
 	close_window_if_expired(now_ms);
 
+	for (uint8_t i = 0; i < peer_count; i++) {
+		if ((in_flight_mask(i) & RX_PROFILE) &&
+		    static_cast<uint32_t>(now_ms - profile_progress[i].last_reply_ms) >= kProfileReplyTimeoutMs) {
+			peers[i].flags |= CI_PEER_FLAG_NAK;
+			finish_profile_inquiry(i);
+		}
+	}
+
 	if (pe_get.active && static_cast<uint32_t>(now_ms - pe_get.start_ms) >= CI_PE_GET_TIMEOUT_MS) {
 		const int idx_i = find_peer(pe_get.peer_muid);
 		if (idx_i >= 0)
@@ -628,6 +671,7 @@ void midici_initiator_start_discovery(uint32_t now_ms)
 	memset(peers, 0, sizeof(peers));
 	memset(tx_pending, 0, sizeof(tx_pending));
 	memset(rx_pending, 0, sizeof(rx_pending));
+	memset(profile_progress, 0, sizeof(profile_progress));
 	pe_get = {};
 	peer_count = 0;
 	window_start_ms = now_ms;
@@ -693,7 +737,7 @@ bool midici_initiator_on_message(uint8_t group, const uint8_t *payload, uint16_t
 		handle_endpoint_reply(m, payload);
 		return true;
 	case T::ProfileInquiryReply:
-		handle_profile_reply(m);
+		handle_profile_reply(m, now_ms);
 		return true;
 	case T::PropertyExchangeCapabilitiesReply:
 		handle_pe_caps_reply(m, payload, len);
@@ -713,6 +757,12 @@ void midici_initiator_on_muid_changed(void)
 {
 	check_reset();
 	echo_armed = false;
+	for (uint8_t i = 0; i < peer_count; i++) {
+		if (in_flight_mask(i) & RX_PROFILE) {
+			peers[i].flags |= CI_PEER_FLAG_NAK;
+			finish_profile_inquiry(i);
+		}
+	}
 	if (pe_get.active) {
 		const int idx = find_peer(pe_get.peer_muid);
 		pe_get.active = false;

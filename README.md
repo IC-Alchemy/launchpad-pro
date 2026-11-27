@@ -106,9 +106,16 @@ The full pad map of the menu and every check to run on the hardware are in
 The Standalone Function Block supports MIDI-CI 1.2 over USB UMP. It answers
 Discovery and Product Instance ID inquiries, handles MUID invalidation,
 collisions, and negative acknowledgments, and supports Property Exchange
-(Common Rules for PE 1.1). Discovery advertises Property Exchange only; Profiles
-and Process Inquiry are not supported. The Windows UI calls UMP group 0
-**Group 1**.
+(Common Rules for PE 1.1). Discovery advertises Property Exchange. The Windows
+UI calls UMP group 0 **Group 1**.
+
+When a peer advertises Profile Configuration, the Launchpad sends a
+Function Block Profile Inquiry. It counts enabled and disabled entries from
+channel, Group, and Function Block replies and publishes the snapshot after the
+final `0x7F` reply, even when both lists in that reply are empty. This follows
+section 2.4 of the [Common Rules for MIDI-CI Profiles v1.1](https://midi.org/common-rules-for-midi-ci-profiles).
+The Launchpad implements no local Profile. It returns a MIDI-CI NAK for incoming
+Profile requests, including the requested Profile ID where applicable.
 
 Property Exchange resources, one request at a time, messages up to 320 bytes:
 
