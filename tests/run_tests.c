@@ -22,6 +22,7 @@ void test_settings_all(void);
 void test_pad_engine_all(void);
 void test_pressure_all(void);
 void test_ui_all(void);
+void test_palette_all(void);
 void test_pads_all(void);
 void test_twostage_all(void);
 void test_midici_all(void);
@@ -45,6 +46,7 @@ int main(void)
 	test_pad_engine_all();
 	test_pressure_all();
 	test_ui_all();
+	test_palette_all();
 	test_pads_all();
 	test_twostage_all();
 	test_midici_all();

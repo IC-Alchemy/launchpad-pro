@@ -1,6 +1,7 @@
 #include "test.h"
 #include "instrument/ui.h"
 #include "instrument/settings.h"
+#include "instrument/palette.h"
 #include "midici/midici.h"
 #include "midici/responder.h"
 #include "midici/initiator.h"
@@ -8,6 +9,7 @@
 #include "pads/pad_velocity.h"
 #include "scales/scales.h"
 #include "ump/ump.h"
+#include "platform/pads.h"
 #include "stubs/io_stub.h"
 #include "stubs/stubs.h"
 #include "app_defs.h"
@@ -60,10 +62,12 @@ static int count_kind(int from, char k)
 static void test_play_page_colours_default(void)
 {
 	setup();
-	CHECK(led_is(11, 0, 20, 63));  /* C: root */
-	CHECK(led_is(12, 0, 4, 16));   /* D: scale */
-	CHECK(led_is(13, 8, 24, 40));  /* E: 3rd */
-	CHECK(led_is(15, 8, 24, 40));  /* G: 5th */
+	CHECK(led_is(11, 0, 16, 63));  /* C: root */
+	/* the default palette, Ocean */
+	CHECK(led_is(12, 0, 4, 15));   /* D: scale */
+	CHECK(led_is(13, 13, 6, 0));   /* E: 3rd */
+	CHECK(led_is(15, 0, 40, 58));  /* G: 5th */
+	CHECK(led_is(98, 0, 0, 0));    /* the Surface page button: menu only */
 	CHECK(led_is(91, 6, 6, 6));
 	CHECK(led_is(92, 6, 6, 6));
 	CHECK(led_is(93, 6, 6, 6));
@@ -80,7 +84,6 @@ static void test_initial_draw_clears_unused_leds(void)
 	pe_init(io_adc, ui_on_sounding);
 	ui_init(T0);
 	CHECK(led_is(10, 0, 0, 0));
-	CHECK(led_is(80, 0, 0, 0));
 	CHECK(led_is(19, 0, 0, 0));
 	CHECK(led_is(89, 0, 0, 0));
 	CHECK(led_is(1, 0, 0, 0));
@@ -89,7 +92,7 @@ static void test_initial_draw_clears_unused_leds(void)
 	CHECK(led_is(96, 0, 0, 0));
 	CHECK(led_is(97, 0, 0, 0));
 	CHECK(led_is(98, 0, 0, 0));
-	CHECK(led_is(11, 0, 20, 63));
+	CHECK(led_is(11, 0, 16, 63));
 }
 
 static void test_tuned_notes_carry_their_pitch(void)
@@ -161,11 +164,11 @@ static void test_same_pitch_pads_light_together(void)
 	CHECK(led_is(18, 63, 63, 63));
 	CHECK(led_is(25, 63, 63, 63));
 	CHECK(led_is(32, 63, 63, 63));
-	CHECK(led_is(11, 0, 20, 63));  /* 60 is not sounding */
+	CHECK(led_is(11, 0, 16, 63));  /* 60 is not sounding */
 	ui_pad(25, 0, T0 + 20);
-	CHECK(led_is(18, 0, 20, 63));
-	CHECK(led_is(25, 0, 20, 63));
-	CHECK(led_is(32, 0, 20, 63));
+	CHECK(led_is(18, 0, 16, 63));
+	CHECK(led_is(25, 0, 16, 63));
+	CHECK(led_is(32, 0, 16, 63));
 }
 
 static void test_peak_window_lights_when_sounding(void)
@@ -173,7 +176,7 @@ static void test_peak_window_lights_when_sounding(void)
 	setup();
 	ui_pad(11, 100, T0);
 	CHECK_EQ(io_n, 0);
-	CHECK(led_is(11, 0, 20, 63));  /* capturing: not sounding yet */
+	CHECK(led_is(11, 0, 16, 63));  /* capturing: not sounding yet */
 	ui_poll(T0 + PEAK_WINDOW_MS);
 	CHECK_EQ(count_kind(0, 'N'), 1);
 	CHECK(led_is(11, 63, 63, 63));
@@ -190,7 +193,7 @@ static void test_octave_arrows_clamp(void)
 	for (i = 0; i < 9; i++)
 		tap(92, T0 + 10 + i);
 	CHECK_EQ(ui_settings()->octave, 0);
-	CHECK(led_is(11, 0, 20, 63));
+	CHECK(led_is(11, 0, 16, 63));
 	CHECK_EQ(io_n, 0);
 }
 
@@ -203,7 +206,7 @@ static void test_root_arrows_wrap(void)
 	CHECK_EQ(ui_settings()->root, 0);
 	tap(94, T0 + 2);
 	CHECK_EQ(ui_settings()->root, 1);
-	CHECK(led_is(11, 0, 20, 63));  /* the bottom-left pad is still the root */
+	CHECK(led_is(11, 0, 16, 63));  /* the bottom-left pad is still the root */
 }
 
 static void test_arrows_keep_held_note(void)
@@ -231,7 +234,7 @@ static void test_setup_tap_opens_and_closes(void)
 	CHECK_EQ(ui_menu_open(), 0);
 	ui_setup(0, T0 + 1500);       /* a long release of a closing press */
 	CHECK_EQ(ui_menu_open(), 0);
-	CHECK(led_is(11, 0, 20, 63));
+	CHECK(led_is(11, 0, 16, 63));
 	CHECK(led_is(91, 6, 6, 6));
 }
 
@@ -242,7 +245,7 @@ static void test_setup_peek(void)
 	CHECK_EQ(ui_menu_open(), 1);
 	ui_setup(0, T0 + 400);
 	CHECK_EQ(ui_menu_open(), 0);
-	CHECK(led_is(11, 0, 20, 63));
+	CHECK(led_is(11, 0, 16, 63));
 }
 
 static void test_menu_entry_releases_notes(void)
@@ -656,7 +659,7 @@ static void test_apply_settings_change(void)
 	CHECK_EQ(io_n, 2);
 	CHECK_EQ(io_log[1].kind, 'F');
 	CHECK_EQ(ui_settings()->root, 2);
-	CHECK(led_is(11, 0, 20, 63));     /* redrawn, no longer white */
+	CHECK(led_is(11, 0, 16, 63));     /* redrawn, no longer white */
 	ui_pad(11, 0, T0 + 40);           /* released by the apply: silent */
 	CHECK_EQ(io_n, 2);
 	/* the save waits for quiet after the last pad event (the release at
@@ -665,6 +668,277 @@ static void test_apply_settings_change(void)
 	CHECK_EQ(io_flash_writes, 0);
 	ui_poll(T0 + 40 + SETTINGS_SAVE_QUIET_MS);
 	CHECK_EQ(io_flash_writes, 1);
+}
+
+/* Ocean and Contrast colours, from instrument/palette.c */
+#define OCEAN_ROOT   0, 16, 63
+#define OCEAN_THIRD  13, 6, 0
+#define OCEAN_FIFTH  0, 40, 58
+#define OCEAN_SCALE  0, 4, 15
+#define CONTRAST_ROOT   63, 16, 0
+#define CONTRAST_FIFTH  63, 40, 0
+#define CONTRAST_SCALE  10, 3, 0
+
+static void split_on(uint8_t upper_channel, uint32_t now)
+{
+	struct settings s = *ui_settings();
+
+	s.velocity_mode = VEL_ZERO_LATENCY;
+	s.split_mode = SPLIT_X;
+	s.upper_palette = PALETTE_CONTRAST;
+	s.upper_channel = upper_channel;
+	ui_apply_settings(&s, now);
+}
+
+static void test_every_palette_lights_the_roles(void)
+{
+	uint8_t p;
+
+	for (p = 0; p < PALETTE_COUNT; p++) {
+		struct settings s;
+
+		setup();
+		s = *ui_settings();
+		s.palette = p;
+		ui_apply_settings(&s, T0);
+		/* C major from pad 11: C D E F G */
+		CHECK(memcmp(io_leds[11], palette_rgb(p, ROLE_ROOT), 3) == 0);
+		CHECK(memcmp(io_leds[12], palette_rgb(p, ROLE_SCALE), 3) == 0);
+		CHECK(memcmp(io_leds[13], palette_rgb(p, ROLE_THIRD), 3) == 0);
+		CHECK(memcmp(io_leds[14], palette_rgb(p, ROLE_SCALE), 3) == 0);
+		CHECK(memcmp(io_leds[15], palette_rgb(p, ROLE_FIFTH), 3) == 0);
+	}
+}
+
+static void test_split_halves_have_their_own_palette(void)
+{
+	setup();
+	split_on(1, T0);
+	CHECK(led_is(11, OCEAN_ROOT));   /* C, lower */
+	CHECK(led_is(13, OCEAN_THIRD));
+	CHECK(led_is(15, OCEAN_FIFTH));
+	CHECK(led_is(44, OCEAN_SCALE));  /* A, top row of the lower half */
+	CHECK(led_is(51, CONTRAST_SCALE));  /* A, bottom row of the upper half */
+	CHECK(led_is(53, CONTRAST_ROOT));   /* C */
+	CHECK(led_is(57, CONTRAST_FIFTH));  /* G */
+	/* off again: the upper half goes back to the grid's palette */
+	{
+		struct settings s = *ui_settings();
+
+		s.split_mode = SPLIT_OFF;
+		ui_apply_settings(&s, T0 + 10);
+	}
+	CHECK(led_is(53, OCEAN_ROOT));
+	CHECK(led_is(51, OCEAN_SCALE));
+}
+
+static void test_split_halves_play_on_their_own_channel(void)
+{
+	setup();
+	split_on(1, T0);
+	/* pads 44 (lower) and 51 (upper) are both A5 = 81: two notes */
+	ui_pad(44, 100, T0 + 10);
+	ui_pad(51, 100, T0 + 20);
+	CHECK_EQ(count_kind(0, 'N'), 2);
+	CHECK_EQ(io_log[0].ch, 0);
+	CHECK_EQ(io_log[0].note, 81);
+	CHECK_EQ(io_log[1].ch, 1);
+	CHECK_EQ(io_log[1].note, 81);
+	CHECK(led_is(44, 63, 63, 63));
+	CHECK(led_is(51, 63, 63, 63));
+	/* each half lights only its own sounding note */
+	ui_pad(44, 0, T0 + 30);
+	CHECK_EQ(io_log[2].kind, 'F');
+	CHECK_EQ(io_log[2].ch, 0);
+	CHECK(led_is(44, OCEAN_SCALE));
+	CHECK(led_is(51, 63, 63, 63));
+	ui_pad(51, 0, T0 + 40);
+	CHECK_EQ(io_log[3].kind, 'F');
+	CHECK_EQ(io_log[3].ch, 1);
+	CHECK(led_is(51, CONTRAST_SCALE));
+
+	/* C6 = 84 is pad 53 in the upper half and pad 46 in the lower:
+	 * pressing it above lights only the upper pad */
+	ui_pad(53, 100, T0 + 50);
+	CHECK_EQ(io_log[4].ch, 1);
+	CHECK_EQ(io_log[4].note, 84);
+	CHECK(led_is(53, 63, 63, 63));
+	CHECK(led_is(46, OCEAN_ROOT));   /* 84 in the lower half: another note */
+	ui_pad(53, 0, T0 + 60);
+}
+
+static void test_split_on_one_channel_shares_notes(void)
+{
+	setup();
+	split_on(0, T0);   /* the upper half on the lower half's channel */
+	CHECK(led_is(51, CONTRAST_SCALE));
+	ui_pad(44, 100, T0 + 10);
+	ui_pad(51, 100, T0 + 20);
+	CHECK_EQ(count_kind(0, 'N'), 1);  /* one note, as without split */
+	CHECK(led_is(44, 63, 63, 63));
+	CHECK(led_is(51, 63, 63, 63));
+	ui_pad(44, 0, T0 + 30);
+	CHECK_EQ(count_kind(0, 'F'), 0);
+	ui_pad(51, 0, T0 + 40);
+	CHECK_EQ(count_kind(0, 'F'), 1);
+}
+
+static void test_split_two_stage_uses_the_half_channel(void)
+{
+	struct settings s;
+
+	setup();
+	split_on(5, T0);
+	s = *ui_settings();
+	s.velocity_mode = VEL_TWO_STAGE;
+	ui_apply_settings(&s, T0 + 1);
+	memset(io_adc, 0, sizeof io_adc);
+	ui_poll(T0 + 10);
+	io_n = 0;
+	/* the Two-stage engine sounds pad 53 (upper half) as its raw value
+	 * ramps up at 10 per ms, as in test_two_stage_plays_scale_pitch */
+	{
+		uint32_t t = T0 + 10;
+		uint16_t v;
+
+		for (v = 0; v <= 700; v = (uint16_t)(v + 10)) {
+			io_adc[pad_raw_index(53)] = v;
+			ui_poll(++t);
+		}
+	}
+	CHECK_EQ(count_kind(0, 'N'), 1);
+	CHECK_EQ(io_log[0].ch, 5);
+	CHECK_EQ(io_log[0].note, 84);
+}
+
+static void test_surface_page(void)
+{
+	setup();
+	setup_tap(T0);
+	tap(98, T0 + 100);
+	CHECK(led_is(98, 63, 63, 63));
+	CHECK(led_is(95, 6, 6, 6));
+	/* lower palette on row 1, upper on row 8: the chosen one in its root
+	 * colour, the others at an eighth */
+	CHECK(led_is(11, OCEAN_ROOT));
+	CHECK(led_is(12, 8, 5, 0));       /* Citrus, dim */
+	CHECK(led_is(84, CONTRAST_ROOT));
+	CHECK(led_is(85, 0, 0, 0));
+	CHECK(led_is(81, 0, 2, 8));       /* Ocean, not chosen */
+	/* previews at the seam: row 5 upper, row 4 lower */
+	CHECK(led_is(41, OCEAN_ROOT));
+	CHECK(led_is(42, OCEAN_SCALE));
+	CHECK(led_is(43, OCEAN_THIRD));
+	CHECK(led_is(45, OCEAN_FIFTH));
+	CHECK(led_is(51, CONTRAST_ROOT));
+	CHECK(led_is(55, CONTRAST_FIFTH));
+	CHECK(led_is(48, 0, 0, 0));
+	CHECK(led_is(58, 0, 0, 0));
+	CHECK(led_is(60, 63, 24, 0));     /* Off selected */
+	/* channels: upper on rows 7/6 (2 = default), lower on rows 3/2 */
+	CHECK(led_is(72, 44, 63, 40));
+	CHECK(led_is(31, 44, 63, 40));
+
+	tap(80, T0 + 110);
+	CHECK_EQ(ui_settings()->split_mode, SPLIT_X);
+	CHECK(led_is(80, 63, 24, 0));
+	CHECK(led_is(60, 8, 3, 0));
+	tap(83, T0 + 120);
+	CHECK_EQ(ui_settings()->upper_palette, PALETTE_GLACIER);
+	CHECK(memcmp(io_leds[51], palette_rgb(PALETTE_GLACIER, ROLE_ROOT), 3) == 0);
+	tap(63, T0 + 130);
+	CHECK_EQ(ui_settings()->upper_channel, 10);
+	tap(22, T0 + 140);
+	CHECK_EQ(ui_settings()->channel, 9);
+	tap(40, T0 + 150);
+	CHECK_EQ(ui_settings()->palette, PALETTE_CITRUS);
+	CHECK(memcmp(io_leds[41], palette_rgb(PALETTE_CITRUS, ROLE_ROOT), 3) == 0);
+	CHECK_EQ(io_n, 0);
+
+	/* on the play page: lower on channel 10, upper on channel 11 */
+	setup_tap(T0 + 200);
+	zero_latency(T0 + 210);
+	ui_pad(11, 100, T0 + 300);
+	ui_pad(53, 100, T0 + 310);
+	CHECK_EQ(io_log[0].ch, 9);
+	CHECK_EQ(io_log[1].ch, 10);
+	CHECK(memcmp(io_leds[18], palette_rgb(PALETTE_CITRUS, ROLE_ROOT), 3) == 0);
+	CHECK(memcmp(io_leds[57], palette_rgb(PALETTE_GLACIER, ROLE_FIFTH), 3) == 0);
+
+	setup_tap(T0 + 400);
+	tap(60, T0 + 410);
+	CHECK_EQ(ui_settings()->split_mode, SPLIT_OFF);
+}
+
+static void test_left_buttons_on_play_page(void)
+{
+	static const uint8_t palette_buttons[] = {50, 40, 30, 20};
+	static const uint8_t modes[] = {80, 70, 60};
+	static const uint8_t grid[] = {44, 45, 54, 55};
+	static const uint8_t channels[][4] = {{0, 0, 1, 1}, {0, 1, 0, 1}, {0, 0, 0, 0}};
+	static const uint8_t expected_modes[] = {SPLIT_X, SPLIT_Y, SPLIT_OFF};
+
+	setup();
+	zero_latency(T0);
+	CHECK(led_is(50, OCEAN_ROOT));
+	CHECK(led_is(40, 8, 5, 0));
+	CHECK(led_is(30, 0, 7, 8));
+	CHECK(led_is(20, 8, 2, 0));
+	CHECK(led_is(10, 0, 0, 0));
+
+	/* A palette tap recolours the grid while held notes keep sounding. */
+	ui_pad(11, 100, T0 + 10);
+	for (uint8_t p = 0; p < PALETTE_COUNT; p++) {
+		tap(palette_buttons[p], T0 + 20 + p);
+		CHECK_EQ(ui_settings()->palette, p);
+		CHECK_MEM(io_leds[palette_buttons[p]], palette_rgb(p, ROLE_ROOT), 3);
+		CHECK_MEM(io_leds[15], palette_rgb(p, ROLE_FIFTH), 3);
+		CHECK(led_is(11, 63, 63, 63));
+	}
+	CHECK_EQ(io_n, 1);
+	tap(50, T0 + 26);
+	ui_pad(11, 0, T0 + 27);
+	tap(10, T0 + 28);
+	CHECK_EQ(ui_settings()->palette, PALETTE_OCEAN);
+	CHECK_EQ(ui_settings()->split_mode, SPLIT_OFF);
+	CHECK_EQ(io_n, 2);
+
+	/* The four pads around the centre exercise both seams on both sides. */
+	for (uint8_t m = 0; m < sizeof modes; m++) {
+		int before = io_n;
+
+		tap(modes[m], T0 + 30 + m * 20);
+		CHECK_EQ(io_n, before);
+		CHECK_EQ(ui_settings()->split_mode, expected_modes[m]);
+		for (uint8_t i = 0; i < sizeof modes; i++)
+			CHECK(led_is(modes[i], i == m ? 63 : 8, i == m ? 24 : 3, 0));
+		if (expected_modes[m] == SPLIT_Y) {
+			CHECK(led_is(14, OCEAN_SCALE));
+			CHECK(led_is(15, CONTRAST_FIFTH));
+			CHECK_MEM(io_leds[55], palette_rgb(PALETTE_CONTRAST, ROLE_THIRD), 3);
+		}
+		for (uint8_t i = 0; i < sizeof grid; i++) {
+			unsigned at = T0 + 31 + m * 20 + i * 2;
+
+			ui_pad(grid[i], 100, at);
+			ui_pad(grid[i], 0, at + 1);
+			CHECK_EQ(io_log[before + 2 * i].kind, 'N');
+			CHECK_EQ(io_log[before + 2 * i].ch, channels[m][i]);
+			CHECK_EQ(io_log[before + 2 * i + 1].kind, 'F');
+		}
+		CHECK_EQ(io_n, before + 8);
+		if (m + 1 < sizeof modes) {
+			/* The held pad changes zones, but its old channel gets the Note Off. */
+			before = io_n;
+			ui_pad(45, 100, T0 + 40 + m * 20);
+			tap(modes[m + 1], T0 + 41 + m * 20);
+			ui_pad(45, 0, T0 + 42 + m * 20);
+			CHECK_EQ(io_n, before + 2);
+			CHECK_EQ(io_log[before + 1].kind, 'F');
+			CHECK_EQ(io_log[before + 1].ch, channels[m][1]);
+			CHECK_EQ(io_log[before + 1].note, io_log[before].note);
+		}
+	}
 }
 
 static void test_setup_led_reflects_protocol(void)
@@ -694,9 +968,9 @@ static void test_transport_change_forgets_held_notes(void)
 	mark = io_n;
 	ui_transport_changed(T0 + 20);
 	CHECK_EQ(io_n, mark);              /* the transport ended the note */
-	CHECK(led_is(18, 0, 20, 63));
-	CHECK(led_is(25, 0, 20, 63));
-	CHECK(led_is(32, 0, 20, 63));
+	CHECK(led_is(18, 0, 16, 63));
+	CHECK(led_is(25, 0, 16, 63));
+	CHECK(led_is(32, 0, 16, 63));
 	ui_poll(T0 + 30);
 	ui_pad(25, 0, T0 + 40);            /* the held pad's release: silent */
 	CHECK_EQ(io_n, mark);
@@ -884,27 +1158,35 @@ static void test_midici_button_play_and_menu_entry(void)
 
 	setup_ci();
 	before = *ui_settings();
-	tap(98, T0 + 10);
+	tap(89, T0 + 10);
 	CHECK_EQ(ui_menu_open(), 0);
 	CHECK_EQ(midici_tx_pending(), 0);
 	CHECK_EQ(midici_initiator_is_discovering(), 0);
 	CHECK_EQ(io_n, 0);
-	CHECK(led_is(98, 0, 0, 0));
+	CHECK(led_is(89, 0, 0, 0));
 	CHECK_MEM(&before, ui_settings(), sizeof before);
 
 	setup_tap(T0 + 50);
 	CHECK_EQ(ui_menu_open(), 1);
-	/* Release-only on 98 does not switch page or trigger Discovery */
-	ui_pad(98, 0, T0 + 80);
+	/* Release-only on 89 does not switch page or trigger Discovery */
+	ui_pad(89, 0, T0 + 80);
 	CHECK_EQ(midici_initiator_is_discovering(), 0);
 	CHECK_EQ(midici_tx_pending(), 0);
 
-	/* Pressing 98 enters PAGE_MIDICI and starts Discovery */
-	tap(98, T0 + 100);
+	/* The Surface button selects its own page without starting Discovery. */
+	tap(98, T0 + 90);
 	CHECK(led_is(98, 63, 63, 63));
+	CHECK(led_is(89, 6, 6, 6));
+	CHECK_EQ(midici_initiator_is_discovering(), 0);
+	CHECK_EQ(midici_tx_pending(), 0);
+
+	/* Pressing 89 enters PAGE_MIDICI and starts Discovery. */
+	tap(89, T0 + 100);
+	CHECK(led_is(89, 63, 63, 63));
 	CHECK(led_is(95, 6, 6, 6));
 	CHECK(led_is(96, 6, 6, 6));
 	CHECK(led_is(97, 6, 6, 6));
+	CHECK(led_is(98, 6, 6, 6));
 	CHECK(led_is(91, 0, 0, 0));
 	CHECK_EQ(midici_initiator_is_discovering(), 1);
 	CHECK(midici_tx_pending() > 0);
@@ -920,7 +1202,7 @@ static void test_midici_pad11_trigger_and_window_expiry(void)
 	setup_ci();
 	before = *ui_settings();
 	setup_tap(T0);
-	tap(98, T0 + 10);
+	tap(89, T0 + 10);
 	drain_ci_tx();
 	CHECK(led_is(11, 0, 48, 63));
 	CHECK(led_is(21, 0, 0, 0));
@@ -956,7 +1238,7 @@ static void test_midici_peer_leds_and_poll_refresh(void)
 
 	setup_ci();
 	setup_tap(T0);
-	tap(98, T0 + 10);
+	tap(89, T0 + 10);
 	my_muid = midici_muid();
 	drain_ci_tx();
 
@@ -996,17 +1278,17 @@ static void test_midici_peer_leds_and_poll_refresh(void)
 	/* Closing Setup restores play-page LEDs; background peer does not overwrite them */
 	setup_tap(T0 + 100);
 	CHECK_EQ(ui_menu_open(), 0);
-	CHECK(led_is(11, 0, 20, 63));
-	CHECK(led_is(98, 0, 0, 0));
+	CHECK(led_is(11, OCEAN_ROOT));
+	CHECK(led_is(89, 0, 0, 0));
 
 	midici_initiator_start_discovery(T0 + 110);
 	feed_peer_discovery(0x00110010u, my_muid, 0x00u, T0 + 111);
 	ui_poll(T0 + 112);
-	CHECK(led_is(21, 0, 4, 16)); /* still Play-page scale colour */
+	CHECK(led_is(21, OCEAN_SCALE)); /* still Play-page scale colour */
 
 	/* Reopening Setup restores PAGE_MIDICI with the peer LED */
 	setup_tap(T0 + 200);
-	CHECK(led_is(98, 63, 63, 63));
+	CHECK(led_is(89, 63, 63, 63));
 	CHECK(led_is(21, 63, 24, 0));
 }
 
@@ -1014,13 +1296,13 @@ static void test_midici_preserves_tuning_and_options_controls(void)
 {
 	setup_ci();
 	setup_tap(T0);
-	tap(98, T0 + 10);
-	CHECK(led_is(98, 63, 63, 63));
+	tap(89, T0 + 10);
+	CHECK(led_is(89, 63, 63, 63));
 
 	/* BTN_TUNING (97) still selects Tuning page and changes tuning */
 	tap(97, T0 + 20);
 	CHECK(led_is(97, 63, 63, 63));
-	CHECK(led_is(98, 6, 6, 6));
+	CHECK(led_is(89, 6, 6, 6));
 	tap(82, T0 + 30);
 	CHECK_EQ(ui_settings()->tuning, 1);
 
@@ -1069,4 +1351,11 @@ void test_ui_all(void)
 	RUN(test_midici_pad11_trigger_and_window_expiry);
 	RUN(test_midici_peer_leds_and_poll_refresh);
 	RUN(test_midici_preserves_tuning_and_options_controls);
+	RUN(test_every_palette_lights_the_roles);
+	RUN(test_split_halves_have_their_own_palette);
+	RUN(test_split_halves_play_on_their_own_channel);
+	RUN(test_split_on_one_channel_shares_notes);
+	RUN(test_split_two_stage_uses_the_half_channel);
+	RUN(test_surface_page);
+	RUN(test_left_buttons_on_play_page);
 }

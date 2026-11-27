@@ -6,6 +6,7 @@
 #include "midici/responder.h"
 #include "midici/ci_pe.h"
 #include "instrument/settings.h"
+#include "instrument/palette.h"
 #include "platform/lib_private.h"
 #include "ump/ump.h"
 #include "midi2.h"
@@ -268,7 +269,7 @@ static void test_ci_reply_retries_and_is_discarded_on_alt_change(void)
 
 /* ---- MIDI-CI Property Exchange, end to end over USB ---- */
 
-#define PE_MSGS 12
+#define PE_MSGS 16
 static struct ump_sysex7_rx pe_rx[PE_MSGS];
 static uint8_t pe_count;
 static uint8_t pe_muid[4];	/* the device's MUID, from its Discovery Reply */
@@ -435,7 +436,7 @@ static void pe_setup(uint16_t max_sysex, int bound)
 
 static void test_ci_pe_capabilities_and_get(void)
 {
-	static char hdr[64], body[2048], want[2048];
+	static char hdr[64], body[4096], want[4096];
 	uint16_t n;
 
 	pe_setup(4096, 0);
@@ -508,7 +509,7 @@ static void test_ci_pe_capabilities_and_get(void)
 
 static void test_ci_pe_small_initiator_and_terminate(void)
 {
-	static char hdr[64], body[2048], want[2048];
+	static char hdr[64], body[4096], want[4096];
 	uint16_t n;
 
 	/* an initiator that takes 128-byte SysEx gets 128-byte chunks */
@@ -662,6 +663,51 @@ static void pe_expect_notify(const uint8_t to[4], unsigned id, uint8_t res)
 	CHECK_MEM(body, want, n);
 }
 
+/* X-SurfaceSettings end to end: Get, a Set from another initiator applied
+ * like a menu change, and the subscriber's notify */
+static void test_ci_pe_surface_settings(void)
+{
+	static char hdr[64], body[512], want[512];
+	unsigned id;
+	uint16_t n;
+
+	pe_setup(4096, 1);
+	pe_send(0x34, 1, "{\"resource\":\"X-SurfaceSettings\"}", "");
+	host_in_pe();
+	n = pe_reply(0x35, 1, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	CHECK_EQ(n, pe_render(CI_PE_SURFACE_SETTINGS, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, n);
+
+	id = pe_subscribe(PE_ME, 2, "X-SurfaceSettings");
+	CHECK(id != 0);
+	{
+		const char *set = "{\"splitMode\":\"y\",\"upperPalette\":\"glacier\",\"upperChannel\":5}";
+
+		pe_send_from(PE_OTHER, 0x36, 3, "{\"resource\":\"X-SurfaceSettings\"}", 1, 1, set,
+		             (uint16_t)strlen(set));
+	}
+	host_in_pe();
+	CHECK(pe_count >= 2);
+	CHECK_EQ(pe_rx[0].buf[4], 0x37);
+	CHECK_EQ(fake_applies, 1);
+	CHECK_EQ(fake_s.split_mode, SPLIT_Y);
+	CHECK_EQ(fake_s.upper_palette, PALETTE_GLACIER);
+	CHECK_EQ(fake_s.upper_channel, 4);
+	CHECK_EQ(pe_rx[1].buf[4], 0x38);
+	CHECK_MEM(pe_rx[1].buf + 10, PE_ME, 4);
+
+	/* a palette change on the device notifies too */
+	fake_s.palette = PALETTE_CITRUS;
+	pe_expect_notify(PE_ME, id, CI_PE_SURFACE_SETTINGS);
+
+	/* the ChannelList now lists both halves */
+	pe_send(0x34, 4, "{\"resource\":\"ChannelList\"}", "");
+	host_in_pe();
+	n = pe_reply(0x35, 4, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strstr(body, "\"Standalone Right\",\"channel\":5") != 0);
+}
+
 static void test_ci_pe_subscribe(void)
 {
 	static char hdr[64], body[8];
@@ -810,7 +856,7 @@ static void send_discovery_from(const uint8_t src[4], uint32_t max_sysex, struct
 
 static void test_ci_pe_one_chunk_per_pass_and_backpressure(void)
 {
-	static char body[2048], want[2048];
+	static char body[4096], want[4096];
 	struct pe_view v;
 	uint16_t total_chunks, blen = 0;
 
@@ -912,7 +958,7 @@ static void test_ci_pe_one_chunk_per_pass_and_backpressure(void)
 
 static void test_ci_pe_multi_muid_max_sysex_cache(void)
 {
-	static char hdr[64], body[2048], want[2048];
+	static char hdr[64], body[4096], want[4096];
 	static const uint8_t PE_UNK[4] = {9, 10, 11, 12};
 	static const uint8_t PE_C[4] = {13, 14, 15, 16};
 	struct ump_sysex7_rx reply;
@@ -1100,7 +1146,7 @@ static void test_ci_pe_multi_muid_max_sysex_cache(void)
 
 static void test_ci_non_discovery_self_echo_ignored(void)
 {
-	static char hdr[64], body[2048], want[2048];
+	static char hdr[64], body[4096], want[4096];
 	struct ump_sysex7_rx reply;
 	unsigned id;
 
@@ -1934,6 +1980,7 @@ void test_usb_data_all(void)
 	RUN(test_ci_pe_one_chunk_per_pass_and_backpressure);
 	RUN(test_ci_pe_multi_muid_max_sysex_cache);
 	RUN(test_ci_non_discovery_self_echo_ignored);
+	RUN(test_ci_pe_surface_settings);
 	RUN(test_ep1_out_odd_length);
 	RUN(test_ep1_out_leaves_nak_until_poll);
 	RUN(test_backpressure_nak_until_space);

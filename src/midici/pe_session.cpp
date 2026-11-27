@@ -16,7 +16,8 @@ using T = ms::MessageType;
 
 constexpr uint8_t kGroup = 0;	/* PE is answered on the Standalone Function Block only */
 constexpr uint8_t kHeaderMax = 48;
-constexpr uint8_t kSubscribable[2] = {CI_PE_SCALE_SETTINGS, CI_PE_PLAY_OPTIONS};
+constexpr uint8_t kSubscribable[] = {CI_PE_SCALE_SETTINGS, CI_PE_PLAY_OPTIONS, CI_PE_SURFACE_SETTINGS};
+constexpr int kSubCount = sizeof kSubscribable / sizeof kSubscribable[0];
 /* PE Notify status that ends a transaction (Common Rules for PE, 144: terminate). */
 constexpr int32_t kStatusTerminate = 144;
 
@@ -63,7 +64,7 @@ struct Subscription {
 	uint32_t muid;
 	uint16_t id;		/* subscribeId is "lp" + id */
 };
-Subscription subs[2];	/* indexed like kSubscribable */
+Subscription subs[kSubCount];	/* indexed like kSubscribable */
 uint16_t next_sub_id = 1;
 uint8_t notify_pending;	/* CI_PE_BIT mask */
 
@@ -85,7 +86,7 @@ PeerMax peer_cache[kPeerCacheSize];
 
 int sub_index(uint8_t resource)
 {
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < kSubCount; i++)
 		if (kSubscribable[i] == resource)
 			return i;
 	return -1;
@@ -346,7 +347,7 @@ void on_get(const ms::ParsedMessage &m, const uint8_t *payload, const char *piid
  * changed resources, except the initiator that made the change. */
 void mark_changed(uint8_t bits, uint32_t except)
 {
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < kSubCount; i++)
 		if (subs[i].active && (bits & CI_PE_BIT(kSubscribable[i])) && subs[i].muid != except)
 			notify_pending |= CI_PE_BIT(kSubscribable[i]);
 }
@@ -573,7 +574,7 @@ void poll(uint32_t my_muid, const char *piid)
 		have_last_seen = true;
 	}
 	if (!out.active && notify_pending && settings_get) {
-		for (int i = 0; i < 2; i++) {
+		for (int i = 0; i < kSubCount; i++) {
 			const uint8_t r = kSubscribable[i];
 			if (!(notify_pending & CI_PE_BIT(r)))
 				continue;
@@ -602,7 +603,7 @@ bool busy()
 uint8_t subscriptions()
 {
 	uint8_t bits = 0;
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < kSubCount; i++)
 		if (subs[i].active)
 			bits |= CI_PE_BIT(kSubscribable[i]);
 	return bits;

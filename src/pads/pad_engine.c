@@ -24,11 +24,16 @@ enum { PE_DEST_USB, PE_DEST_DIN, PE_DESTS };
  * channel and the DIN flag are latched at press so the Note Off always
  * matches the Note On, whatever the layout or settings do meanwhile.
  *
- * Poly pressure state (last values sent and when) belongs to a pitch, not a
- * pad. Rather than 128 per-pitch records, every HELD pad keeps a copy of its
- * pitch's state: a pad joining a sounding pitch copies it from a pad that
- * already holds the pitch, and each send updates every holder. So any
- * holder can leave and the others carry on with the right state. */
+ * A note is a pitch on a channel: HELD pads with the same pitch and channel
+ * share one note (one Note On, one Note Off), found by scanning the 64 pads
+ * rather than keeping per-note counts. With the split surface the same pitch
+ * can sound on two channels at once, as two notes.
+ *
+ * Poly pressure state (last values sent and when) belongs to a note, not a
+ * pad. Every HELD pad keeps a copy of its note's state: a pad joining a
+ * sounding note copies it from a pad that already holds the note, and each
+ * send updates every holder. So any holder can leave and the others carry
+ * on with the right state. */
 struct pe_pad
 {
     union
@@ -59,26 +64,23 @@ typedef char pe_pad_size_check[(sizeof(struct pe_pad) <= 16) ? 1 : -1];
 
 static struct pe_pad g_pad[64];
 
-/* How many pads are sounding each pitch. Keyed by pitch only, not by
- * channel or DIN flag: those change only in the menu (or when settings are
- * applied), and both call pe_release_all() first, so every sounding pad
- * shares one channel and destination set. The latched ch/din are still used
- * for each Note Off. */
-static uint8_t g_count[128];
-
-/* HELD pads in all */
-static uint8_t g_nheld;
-
-/* Channel pressure state, same meaning as the pad fields. All sounding pads
- * share one channel and destination set (see g_count), so ch is the
- * channel the last value went out on. */
-static struct
+/* Channel pressure state per MIDI channel, same meaning as the pad fields,
+ * and the HELD pads on that channel. The DIN flag changes only in the menu
+ * (or when settings are applied), and both call pe_release_all() first, so
+ * the pads on one channel share one destination set. */
+struct pe_chan
 {
     uint16_t sent[PE_DESTS];
     uint16_t sent12;
     uint8_t sent7;
-    uint8_t ch;
-} g_chan;
+    uint8_t nheld;
+};
+
+/* compile-time check of the channel table's RAM budget (it replaced a
+ * 128-byte per-pitch count) */
+typedef char pe_chan_size_check[(sizeof(struct pe_chan) <= 8) ? 1 : -1];
+
+static struct pe_chan g_chan[16];
 
 /* the ms counter of the last pressure pass: one pass per new value */
 static uint32_t g_tick;
@@ -160,32 +162,45 @@ static void pressure_copy(struct pe_pad *dst, const struct pe_pad *src)
     dst->sent7 = src->sent7;
 }
 
+/* same note: pitch and channel */
+static uint8_t same_note(const struct pe_pad *a, const struct pe_pad *b)
+{
+    return a->pitch == b->pitch && a->ch == b->ch;
+}
+
+/* another HELD pad sounding p's note, or NULL */
+static struct pe_pad *other_holder(const struct pe_pad *p)
+{
+    uint8_t s;
+
+    for (s = 0; s < 64; s++)
+    {
+        if (&g_pad[s] != p && g_pad[s].state == PE_HELD && same_note(&g_pad[s], p))
+        {
+            return &g_pad[s];
+        }
+    }
+    return NULL;
+}
+
 /* capture (or zero-latency press) finished: the pad now sounds its pitch.
  * The press time is no longer needed: t now holds pressure send times. */
 static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
 {
     uint8_t slot = (uint8_t)(p - g_pad);
+    struct pe_pad *h = other_holder(p);
 
     p->state = PE_HELD;
     p->v.filt = (uint32_t)raw(slot) << PE_FILT_FRAC;
-    if (g_nheld++ == 0)
+    if (g_chan[p->ch].nheld++ == 0)
     {
         /* channel pressure is at 0 here: the last release sent it */
-        pressure_start(g_chan.sent, (uint16_t)now);
+        pressure_start(g_chan[p->ch].sent, (uint16_t)now);
     }
-    if (g_count[p->pitch]++ != 0)
+    if (h != NULL)
     {
-        /* join the pitch: take over its pressure state from a holder */
-        uint8_t s;
-
-        for (s = 0; s < 64; s++)
-        {
-            if (s != slot && g_pad[s].state == PE_HELD && g_pad[s].pitch == p->pitch)
-            {
-                pressure_copy(p, &g_pad[s]);
-                break;
-            }
-        }
+        /* join the note: take over its pressure state from a holder */
+        pressure_copy(p, h);
         return;
     }
     pressure_start(p->t.sent, (uint16_t)now);
@@ -209,7 +224,7 @@ static void sound_v(struct pe_pad *p, uint16_t vel, uint32_t now)
     }
     if (g_on_sounding != NULL)
     {
-        g_on_sounding(p->pitch, 1);
+        g_on_sounding(p->pitch, p->ch, 1);
     }
 }
 
@@ -219,15 +234,15 @@ static void sound(struct pe_pad *p, uint32_t now, uint8_t wide)
     sound_v(p, velocity(p->v.peak, wide), now);
 }
 
-/* a held pad stops sounding its pitch */
+/* a held pad stops sounding its note */
 static void silence(struct pe_pad *p)
 {
     p->state = PE_IDLE;
-    if (g_nheld != 0)
+    if (g_chan[p->ch].nheld != 0)
     {
-        g_nheld--;
+        g_chan[p->ch].nheld--;
     }
-    if (g_count[p->pitch] == 0 || --g_count[p->pitch] != 0)
+    if (other_holder(p) != NULL)
     {
         return;
     }
@@ -238,7 +253,7 @@ static void silence(struct pe_pad *p)
     }
     if (g_on_sounding != NULL)
     {
-        g_on_sounding(p->pitch, 0);
+        g_on_sounding(p->pitch, p->ch, 0);
     }
 }
 
@@ -248,29 +263,31 @@ static uint8_t usb_nonzero(uint16_t sent12)
     return io_port_is_midi2(USBSTANDALONE) ? sent12 != 0 : (sent12 >> 5) != 0;
 }
 
-/* channel pressure back to 0 on every destination that last got more */
-static void channel_zero(void)
+/* a channel's pressure back to 0 on every destination that last got more */
+static void channel_zero(uint8_t ch)
 {
-    if (usb_nonzero(g_chan.sent12))
+    struct pe_chan *c = &g_chan[ch];
+
+    if (usb_nonzero(c->sent12))
     {
-        io_channel_pressure(USBSTANDALONE, g_chan.ch, 0);
+        io_channel_pressure(USBSTANDALONE, ch, 0);
     }
-    if (g_chan.sent7 != 0)
+    if (c->sent7 != 0)
     {
-        io_channel_pressure(DINMIDI, g_chan.ch, 0);
+        io_channel_pressure(DINMIDI, ch, 0);
     }
-    g_chan.sent12 = 0;
-    g_chan.sent7 = 0;
+    c->sent12 = 0;
+    c->sent7 = 0;
 }
 
-/* a HELD pad lets go: its pitch ends with the last holder, and channel
- * pressure goes to 0 at once when it was the last held pad */
+/* a HELD pad lets go: its note ends with the last holder, and its channel's
+ * pressure goes to 0 at once when it was the channel's last held pad */
 static void release_held(struct pe_pad *p)
 {
     silence(p);
-    if (g_nheld == 0)
+    if (g_chan[p->ch].nheld == 0)
     {
-        channel_zero();
+        channel_zero(p->ch);
     }
 }
 
@@ -394,8 +411,8 @@ static uint8_t pressure_send(uint16_t sent[PE_DESTS], uint16_t *sent12, uint8_t 
 }
 
 /* Once per new ms value: filter every HELD pad's raw sample, then send
- * poly (max over the pads sharing a pitch) or channel (max over all)
- * pressure. CAPTURING pads take no part. */
+ * poly (max over the pads sharing a note) or channel (max over the pads on
+ * each channel) pressure. CAPTURING pads take no part. */
 static void pressure_pass(uint32_t now)
 {
     uint8_t list[64];   /* HELD slots, ascending */
@@ -433,41 +450,52 @@ static void pressure_pass(uint32_t now)
 
     if (g_press_mode == PRESS_CHANNEL)
     {
-        uint16_t max = 0;
-        const struct pe_pad *p = &g_pad[list[0]];
-
+        /* the first held pad of each channel in slot order speaks for it */
         for (k = 0; k < n; k++)
         {
-            if (val[k] > max)
-            {
-                max = val[k];
-            }
-        }
-        g_chan.ch = p->ch;
-        (void)pressure_send(g_chan.sent, &g_chan.sent12, &g_chan.sent7, p->ch, PE_CHANNEL,
-                            p->din, max, now16);
-        return;
-    }
+            const struct pe_pad *p = &g_pad[list[k]];
+            struct pe_chan *c = &g_chan[p->ch];
+            uint16_t max = val[k];
 
-    /* poly: the first holder of each pitch in slot order speaks for it */
-    for (k = 0; k < n; k++)
-    {
-        struct pe_pad *r = &g_pad[list[k]];
-        uint16_t max = val[k];
-        uint8_t shared = g_count[r->pitch] > 1;
-
-        if (shared)
-        {
-            for (j = 0; j < k && g_pad[list[j]].pitch != r->pitch; j++)
+            for (j = 0; j < k && g_pad[list[j]].ch != p->ch; j++)
             {
             }
             if (j < k)
             {
-                continue; /* done with its group */
+                continue; /* done with its channel */
             }
             for (j = (uint8_t)(k + 1); j < n; j++)
             {
-                if (g_pad[list[j]].pitch == r->pitch && val[j] > max)
+                if (g_pad[list[j]].ch == p->ch && val[j] > max)
+                {
+                    max = val[j];
+                }
+            }
+            (void)pressure_send(c->sent, &c->sent12, &c->sent7, p->ch, PE_CHANNEL, p->din, max, now16);
+        }
+        return;
+    }
+
+    /* poly: the first holder of each note in slot order speaks for it */
+    for (k = 0; k < n; k++)
+    {
+        struct pe_pad *r = &g_pad[list[k]];
+        uint16_t max = val[k];
+        uint8_t shared = 0;
+
+        for (j = 0; j < k && !same_note(&g_pad[list[j]], r); j++)
+        {
+        }
+        if (j < k)
+        {
+            continue; /* done with its group */
+        }
+        for (j = (uint8_t)(k + 1); j < n; j++)
+        {
+            if (same_note(&g_pad[list[j]], r))
+            {
+                shared = 1;
+                if (val[j] > max)
                 {
                     max = val[j];
                 }
@@ -478,7 +506,7 @@ static void pressure_pass(uint32_t now)
         {
             for (j = (uint8_t)(k + 1); j < n; j++)
             {
-                if (g_pad[list[j]].pitch == r->pitch)
+                if (same_note(&g_pad[list[j]], r))
                 {
                     pressure_copy(&g_pad[list[j]], r);
                 }
@@ -490,9 +518,7 @@ static void pressure_pass(uint32_t now)
 void pe_init(const uint16_t *adc_buffer, pe_sounding_fn on_sounding)
 {
     memset(g_pad, 0, sizeof g_pad);
-    memset(g_count, 0, sizeof g_count);
-    memset(&g_chan, 0, sizeof g_chan);
-    g_nheld = 0;
+    memset(g_chan, 0, sizeof g_chan);
     g_ticked = 0;
     g_target = NULL;
     g_pitch = NULL;
@@ -623,6 +649,7 @@ void pe_poll(uint32_t now)
 void pe_release_all(void)
 {
     uint8_t slot;
+    uint8_t ch;
 
     for (slot = 0; slot < 64; slot++)
     {
@@ -635,9 +662,11 @@ void pe_release_all(void)
         /* a pending capture is dropped: no Note On, so no Note Off */
         p->state = PE_IDLE;
     }
-    memset(g_count, 0, sizeof g_count);
-    g_nheld = 0;
-    channel_zero();
+    for (ch = 0; ch < 16; ch++)
+    {
+        g_chan[ch].nheld = 0;
+        channel_zero(ch);
+    }
     ts_init(&g_ts);
 }
 
@@ -645,25 +674,36 @@ void pe_forget_all(void)
 {
     uint8_t slot;
 
+    uint8_t ch;
+
     for (slot = 0; slot < 64; slot++)
     {
         struct pe_pad *p = &g_pad[slot];
 
-        /* DIN: the last holder of a pitch ends it, as silence() would */
-        if (p->state == PE_HELD && g_count[p->pitch] != 0 && --g_count[p->pitch] == 0 && p->din)
+        if (p->state != PE_HELD)
+        {
+            p->state = PE_IDLE;
+            continue;
+        }
+        /* DIN: the last holder of a note ends it, as silence() would */
+        p->state = PE_IDLE;
+        if (p->din && other_holder(p) == NULL)
         {
             io_note_off(DINMIDI, p->ch, p->pitch);
         }
-        p->state = PE_IDLE;
     }
-    memset(g_count, 0, sizeof g_count);
-    g_nheld = 0;
-    if (g_chan.sent7 != 0)
+    for (ch = 0; ch < 16; ch++)
     {
-        io_channel_pressure(DINMIDI, g_chan.ch, 0);
+        struct pe_chan *c = &g_chan[ch];
+
+        if (c->sent7 != 0)
+        {
+            io_channel_pressure(DINMIDI, ch, 0);
+        }
+        c->sent12 = 0;
+        c->sent7 = 0;
+        c->nheld = 0;
     }
-    g_chan.sent12 = 0;
-    g_chan.sent7 = 0;
     ts_init(&g_ts);
 }
 

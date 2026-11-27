@@ -1,5 +1,6 @@
 #include "test.h"
 #include "instrument/settings.h"
+#include "instrument/palette.h"
 #include "scales/scales.h"
 #include "stubs/io_stub.h"
 
@@ -42,13 +43,18 @@ static void test_record_round_trip(void)
 	s.pressure_mode = PRESS_OFF; s.pressure_threshold = THRESH_HIGH;
 	s.din_mirror = 1; s.channel = 15; s.pressure_smoothing = SMOOTH_HEAVY;
 	s.tuning = 96; s.scale = 27; s.a4_tenths = 4321;
+	s.palette = PALETTE_CONTRAST; s.split_mode = SPLIT_Y; s.upper_palette = PALETTE_GLACIER; s.upper_channel = 9;
 	settings_encode(&s, rec);
-	CHECK_EQ(SETTINGS_RECORD_LEN, 21);
-	CHECK_MEM(rec, "LPM2\x03", 5);
+	CHECK_EQ(SETTINGS_RECORD_LEN, 25);
+	CHECK_MEM(rec, "LPM2\x05", 5);
 	CHECK_EQ(rec[16], SMOOTH_HEAVY);
 	CHECK_EQ(rec[17], 96);
 	CHECK_EQ(rec[18], 4321 & 0xFF);
 	CHECK_EQ(rec[19], 4321 >> 8);
+	CHECK_EQ(rec[20], PALETTE_CONTRAST);
+	CHECK_EQ(rec[21], SPLIT_Y);
+	CHECK_EQ(rec[22], PALETTE_GLACIER);
+	CHECK_EQ(rec[23], 9);
 	for (i = 0; i < SETTINGS_RECORD_LEN; i++) sum += rec[i];
 	CHECK_EQ(sum & 0xFF, 0);
 	settings_defaults(&d);
@@ -137,6 +143,94 @@ static void test_v2_record_loads_twelve_edo(void)
 	CHECK_EQ(s.pressure_smoothing, 3);
 	CHECK_EQ(s.tuning, 0);
 	CHECK_EQ(s.a4_tenths, 4400);
+}
+
+/* a record from before the surface fields: its settings, Ocean, no split */
+static void test_v3_record_loads_without_split(void)
+{
+	struct settings s;
+	uint8_t v3[21] = {'L', 'P', 'M', '2', 3, 7, 27, 2, 4, 1, 2, 1, 0, 1, 1, 9, 3, 96,
+	                  4321 & 0xFF, 4321 >> 8, 0};
+	uint8_t sum = 0;
+	int i;
+
+	for (i = 0; i < 20; i++) sum = (uint8_t)(sum + v3[i]);
+	v3[20] = (uint8_t)(0u - sum);
+	io_stub_reset();
+	memset(io_flash, 0xFF, sizeof io_flash);
+	memcpy(io_flash, v3, 21);
+	settings_load(&s);
+	CHECK_EQ(s.root, 7);
+	CHECK_EQ(s.scale, 27);
+	CHECK_EQ(s.channel, 9);
+	CHECK_EQ(s.tuning, 96);
+	CHECK_EQ(s.a4_tenths, 4321);
+	CHECK_EQ(s.palette, PALETTE_OCEAN);
+	CHECK_EQ(s.split_mode, 0);
+	CHECK_EQ(s.upper_palette, PALETTE_CONTRAST);
+	CHECK_EQ(s.upper_channel, 1);
+}
+
+static void test_v4_record_migrates_surface(void)
+{
+	static const uint8_t primary[] = {
+		PALETTE_OCEAN, PALETTE_OCEAN, PALETTE_OCEAN, PALETTE_OCEAN,
+		PALETTE_CITRUS, PALETTE_GLACIER, PALETTE_OCEAN, PALETTE_CONTRAST,
+	};
+	static const uint8_t second[] = {
+		PALETTE_OCEAN, PALETTE_CONTRAST, PALETTE_CONTRAST, PALETTE_CONTRAST,
+		PALETTE_CITRUS, PALETTE_GLACIER, PALETTE_CONTRAST, PALETTE_CONTRAST,
+	};
+	struct settings s;
+	uint8_t rec[SETTINGS_RECORD_LEN];
+
+	settings_defaults(&s);
+	s.root = 5;
+	s.upper_channel = 9;
+	settings_encode(&s, rec);
+	rec[4] = 4;
+	for (uint8_t p = 0; p < sizeof primary; p++) {
+		uint8_t sum = 0;
+
+		rec[20] = p;
+		rec[21] = p % 2;
+		rec[22] = p;
+		for (uint8_t i = 0; i < SETTINGS_RECORD_LEN - 1; i++)
+			sum = (uint8_t)(sum + rec[i]);
+		rec[SETTINGS_RECORD_LEN - 1] = (uint8_t)(0u - sum);
+		CHECK(settings_decode(rec, &s));
+		CHECK_EQ(s.palette, primary[p]);
+		CHECK_EQ(s.upper_palette, second[p]);
+		CHECK_EQ(s.split_mode, p % 2 ? SPLIT_X : SPLIT_OFF);
+		CHECK_EQ(s.upper_channel, 9);
+		CHECK_EQ(s.root, 5);
+	}
+}
+
+static void test_surface_fields_validated(void)
+{
+	struct settings s;
+
+	settings_defaults(&s);
+	CHECK_EQ(s.palette, PALETTE_OCEAN);
+	CHECK_EQ(s.split_mode, 0);
+	CHECK(s.upper_channel != s.channel);  /* split on: two channels at once */
+	s.palette = PALETTE_COUNT - 1;
+	s.upper_palette = PALETTE_COUNT - 1;
+	s.upper_channel = 15;
+	s.split_mode = SPLIT_X;
+	CHECK(settings_valid(&s));
+	s.palette = PALETTE_COUNT;
+	CHECK(!settings_valid(&s));
+	s.palette = 0;
+	s.upper_palette = PALETTE_COUNT;
+	CHECK(!settings_valid(&s));
+	s.upper_palette = 0;
+	s.upper_channel = 16;
+	CHECK(!settings_valid(&s));
+	s.upper_channel = 0;
+	s.split_mode = SPLIT_COUNT;
+	CHECK(!settings_valid(&s));
 }
 
 static void test_tuning_fields_validated(void)
@@ -271,6 +365,9 @@ void test_settings_all(void)
 	RUN(test_smoothing_range);
 	RUN(test_v1_record_loads_with_default_smoothing);
 	RUN(test_v2_record_loads_twelve_edo);
+	RUN(test_v3_record_loads_without_split);
+	RUN(test_v4_record_migrates_surface);
+	RUN(test_surface_fields_validated);
 	RUN(test_tuning_fields_validated);
 	RUN(test_blank_flash_loads_defaults);
 	RUN(test_corrupt_record_loads_defaults);

@@ -6,8 +6,14 @@
 
 /* The instrument's user interface: the play page (grid pads to the pad
  * engine, octave and root arrows), the Setup menu (tap toggles, hold peeks)
- * with its Scale, Options, Tuning, and MIDI-CI pages, and every LED. It owns
- * the settings. Runs only from the main loop: not reentrant.
+ * with its Scale, Options, Tuning, Surface and MIDI-CI pages, and every LED.
+ * It owns the settings.
+ *
+ * Surface: the play page lights each pad by its role (scales/scales.h) in
+ * the chosen palette (instrument/palette.h). The left round buttons set
+ * the split mode and primary palette. The upper palette and channel apply
+ * to rows 5..8 in X mode or columns 5..8 in Y mode.
+ * Runs only from the main loop: not reentrant.
  *
  * The caller runs pe_init(adc_buffer, ui_on_sounding) before ui_init. */
 
@@ -36,6 +42,6 @@ uint8_t ui_menu_open(void);
  * the play page (if the menu is closed) and the Setup LED. */
 void ui_transport_changed(uint32_t now);
 /* the pad engine's pe_sounding_fn */
-void ui_on_sounding(uint8_t pitch, uint8_t on);
+void ui_on_sounding(uint8_t pitch, uint8_t ch, uint8_t on);
 
 #endif

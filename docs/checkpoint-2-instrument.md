@@ -38,15 +38,40 @@ repository.
 
 Play page (the menu is closed):
 
-- Pad colours (red, green, blue on the 0 to 63 LED scale):
-  - root note: bright blue (0, 20, 63);
-  - the 3rd and 5th notes of the scale, counting the root as the 1st (E and
-    G in C major; F and Bb in C Minor Pentatonic): lighter blue (8, 24, 40);
-  - every other note of the scale: dark blue (0, 4, 16);
-  - notes outside the scale: dim grey (4, 4, 4), only in the chromatic
-    layouts;
+- Select the primary palette with a left round button. The Surface page
+  (button 98) also lets you set and preview both palettes.
+  Every palette gives each role its own colour (red, green, blue on the 0 to
+  63 LED scale); the default, Ocean:
+  - root note: blue (0, 16, 63), the palette's own hue, used by no other role;
+  - the 5th step of the scale, counting the root as the 1st (G in C major; Bb
+    in C Minor Pentatonic): azure (0, 40, 58), a neighbour of the root's hue
+    and as bright, so root and fifth read as a pair and stand out from the rest;
+  - the 3rd step (E in C major; F in C Minor Pentatonic): dim amber (13, 6, 0),
+    a contrasting hue, kept dim;
+  - every other note of the scale: faint blue (0, 4, 15);
+  - notes outside the scale: faint grey (2, 2, 2) in every palette, only in
+    the chromatic layouts;
   - a pad whose note would be above 127: unlit, and it plays nothing;
-  - a sounding pad: white (63, 63, 63).
+  - a sounding pad: white (63, 63, 63) in every palette.
+
+  The four palettes, in the order of left buttons 50, 40, 30 and 20.
+  The buttons use the root colour, with the active palette brightest.
+
+  | Palette | Root | Fifth | Third | Scale |
+  |---|---|---|---|---|
+  | Ocean | blue (0, 16, 63) | azure (0, 40, 58) | amber (13, 6, 0) | (0, 4, 15) |
+  | Citrus | gold (63, 34, 0) | yellow (63, 56, 0) | blue (0, 7, 26) | (6, 4, 0) |
+  | Glacier | cyan (0, 52, 63) | aquamarine (0, 63, 34) | rose (29, 0, 14) | (0, 5, 5) |
+  | Contrast | vermilion (63, 16, 0) | amber (63, 40, 0) | sky blue (2, 8, 21) | (10, 3, 0) |
+
+  The same rules hold in each, so a colour means the same thing whatever the
+  palette: lightness first, hue second (so the roles still read with colour
+  blindness or in bright light). Treating the LED values as linear light, the
+  CIE lightness L* is about 21 for out-of-scale, 30 for scale notes, 37 to 42
+  for the third, and 52 to 94 for the root and fifth, at least 12 above the
+  third. Contrast keeps to the orange/blue axis (Okabe-Ito), which stays apart
+  under every common colour blindness. Chromatic and All Degrees have no third
+  or fifth: only the root stands out.
 - Buttons 91 and 92 are octave up and down, 93 and 94 are root down and up
   (one semitone, wrapping B to C). They are dim white. Octave is 0 to 7. Held
   notes keep their pitch when you change these.
@@ -56,10 +81,10 @@ Play page (the menu is closed):
 Setup button: tap it to open the menu, tap it again to close. If you hold it
 for 300 ms or more and then release, it is a peek: the menu closes on release.
 Opening the menu releases every note. Menu LEDs: the selected value of each
-row is bright, the others dim.
+row is bright, the others dim. The page buttons (95 to 98 and 89) are bright
+white for the active page and dim white otherwise.
 
-Scale page (button 95, the default menu page; 95 and 96 are bright or dim
-white to show the page):
+Scale page (button 95, the default menu page):
 
 | Row | Pads | What | Colour |
 |---|---|---|---|
@@ -70,7 +95,30 @@ white to show the page):
 | 5 | 51 to 58 | Octave 0 to 7 | red |
 | 4, 3, 2, 1 | 41 to 48, 31 to 38, 21 to 28, 11 to 17 | The scales the current tuning offers, in order. In the twelve-note tunings these are scales 1 to 31: Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Diminished; Whole-half, Whole Tone, Minor Blues, Minor Pentatonic, Major Pentatonic, Harmonic Minor, Melodic Minor, Super Locrian; Bhairav, Hungarian Minor, Minor Gypsy, Hirojoshi, In-Sen, Iwato, Kumoi, Pelog; Spanish, Phrygian Dominant, Lydian Dominant, Marwa Thaat, Poorvi Thaat, Todi Thaat, Chromatic. Other tunings show their own few scales from pad 41 on. | blue |
 
-Tuning page (button 97; 95, 96 and 97 show the page the same way):
+Surface page (button 98). The second half's settings are on top and the
+primary half's below. The left round buttons work here and on the play page.
+
+| Row | Pads | What | Colour |
+|---|---|---|---|
+| 8 | 81 to 84 | Second palette: Ocean, Citrus, Glacier, Contrast | root colour, brightest when selected |
+| 7 | 71 to 78 | Upper channel 1 to 8 | soft green |
+| 6 | 61 to 68 | Upper channel 9 to 16 | soft green |
+| 5 | 51 to 57 | Preview of the upper palette: a major scale from the root (root, 2, 3rd, 4, 5th, 6, 7) | the palette |
+| 4 | 41 to 47 | Preview of the lower palette | the palette |
+| 3 | 31 to 38 | Lower channel 1 to 8 (the Options page's MIDI channel) | soft green |
+| 2 | 21 to 28 | Lower channel 9 to 16 | soft green |
+| 1 | 11 to 14 | Primary palette, same order as row 8 | as row 8 |
+
+Use left button 80 for an X split between rows 4 and 5, button 70 for a
+Y split between columns 4 and 5, and button 60 for the full grid. The second
+palette and channel apply to rows 5 to 8 in X mode or columns 5 to 8 in Y mode
+(Contrast on channel 2 by default). Changing the split releases any held notes.
+On two channels a pitch in both halves is two notes, and each half lights only
+its own sounding pads. With both halves on one channel they share notes.
+Channel pressure is sent per channel. DIN mirror, velocity, pressure and tuning
+apply to both halves.
+
+Tuning page (button 97):
 
 | Row | Pads | What | Colour |
 |---|---|---|---|
@@ -125,6 +173,12 @@ that peaks between raw 120 and about 452 and is held sounds only in Two-stage
 480 sounds at once in Zero-latency but, if held, only after the timeout in Two-stage
 (its high threshold, 480, is above the library trigger of about 452 raw).
 It may be weaker at the loud end.
+
+MIDI-CI page (button 89, the uppermost right-side round button): opening the
+page starts a three-second USB UMP discovery scan. Pad 11 rescans and is bright
+cyan while scanning. Pads 21 to 28 show peers: amber while follow-up queries
+are pending, green once complete for peers that advertise Property Exchange,
+and cyan once complete for other peers.
 
 ## Two-stage and the tuning logs
 
@@ -205,8 +259,10 @@ Result: flashed OK? (yes/no), notes.
 ## 2. Default grid colours
 
 After the reboot, with the monitor running: look at the grid. Expected: C
-major in blue, the C pads bright blue, the E and G pads a lighter blue, the
-other pads (D, F, A, B) dark blue; in this layout every pad is in scale. Press pad 11: expected Note On for note 60 (C3 in the numbering where
+major in the Ocean palette, the C pads blue, the G pads azure, the E pads dim
+amber, the other pads (D, F, A, B) faint blue; in this layout every pad is in
+scale. (A unit with settings from an older image keeps them and starts in
+Ocean with split off.) Press pad 11: expected Note On for note 60 (C3 in the numbering where
 60 is C3; the monitor may call it C4 or C3), white pad while held, Note Off on
 release. Check the top-right pad is higher in pitch than the bottom-left.
 
@@ -335,7 +391,7 @@ Fill in "Result" and "Notes". "Expected" is what I predict.
 | # | Check | Expected (verify) | Result | Notes |
 |---|---|---|---|---|
 | 1 | Flash the stage 2 image | Flashes and reboots | | |
-| 2 | Default grid colours, pad 11 = C3 (60) | Bright blue roots, lighter blue E and G, dark blue others; pad 11 sends 60 | | |
+| 2 | Default grid colours, pad 11 = C3 (60) | Blue roots, azure G, dim amber E, faint blue others; pad 11 sends 60 | | |
 | 3 | Octave and root arrows | Octave 0 to 7, root wraps B to C, held notes keep pitch; top pads unlit and silent above note 127 | | |
 | 4 | Every layout, absolute root | Five layouts as named, pad 11 stays C with absolute root | | |
 | 5 | Minor Pentatonic | Only 5 pitch classes | | |
@@ -402,3 +458,53 @@ Protocol (green Setup LED).
 | 18.6 | Survives unplug | Tuning and A4 restored | | |
 | 18.7 | MIDI 1.0 and DIN | Plain notes | | |
 | 18.8 | Two-way with Alembic | Changes follow both ways | | |
+
+## 19. Palettes and split
+
+1. **Every palette.** On the play page, press left buttons 50, 40, 30 and 20
+   in turn. The chosen button should brighten in its palette's root colour.
+   For each palette, the roots, fifths, thirds and other scale notes should be
+   four clearly different colours. Root and fifth are the bright pair and
+   differ in hue, the third is dim and in a contrasting hue, and the scale
+   notes are faint. Note any palette where the root and fifth look the same
+   from playing distance, where the third looks like a scale note, or where
+   something looks white.
+2. **Out of scale.** Choose the Chromatic 4ths layout (Scale page pad 87).
+   Expected in each palette: out-of-scale pads a faint grey, visibly dimmer
+   than the scale notes and not tinted.
+3. **Previews.** On the Surface page, rows 5 and 4 show the upper and lower
+   palettes as root, 2, 3rd, 4, 5th, 6, 7. Expected: they match the play page.
+4. **Split modes.** With Ocean selected and the second palette set to
+   Contrast, press left button 80. Expect Ocean below and Contrast above.
+   Press 70. Expect Ocean left and Contrast right. Press 60. Expect Ocean
+   throughout. The selected mode button is bright amber. Select X again for
+   the next check.
+5. **Two channels.** Play pad 44 and then pad 51 (both note 81). Expected: a
+   Note On on channel 1, then a second one on channel 2. Only the pressed pads
+   light white. Release them: a Note Off on each channel.
+6. **Upper channel.** On the Surface page press pad 63 (upper channel 11) and
+   pad 34 (lower channel 4). Expected: rows 1 to 4 play on channel 4, rows 5 to
+   8 on channel 11. With Channel pressure (Options pad 62), pressure from each
+   half goes to its own channel, and releasing one half's last pad sends that
+   channel a 0.
+7. **One channel.** Set the upper channel to the lower one. Expected: pads 44
+   and 51 together send one Note On, as without split.
+8. **Saved.** Unplug and plug in again. Expected: palettes, split and both
+   channels are kept.
+9. **From the PC.** In a PE editor (MIDI 2.0 Workbench), read
+   `X-SurfaceSettings`, Set `{"splitMode":"y","upperPalette":"glacier"}` and
+   subscribe. Expected: the grid follows at once, a change on the Surface page
+   shows in the editor, and `ChannelList` lists "Standalone Left" and
+   "Standalone Right" with their channels.
+
+| # | Check | Expected | Result | Notes |
+|---|---|---|---|---|
+| 19.1 | Four palettes | Root, fifth, third and scale apart in each; nothing white | | |
+| 19.2 | Out of scale | Faint grey, dimmer than scale notes | | |
+| 19.3 | Previews | Match the play page | | |
+| 19.4 | X, Y and Off | Horizontal seam, vertical seam, full grid | | |
+| 19.5 | Same pitch, two channels | Two notes, own LEDs | | |
+| 19.6 | Upper channel, channel pressure | Per half; 0 per channel on release | | |
+| 19.7 | One channel | Shared note | | |
+| 19.8 | Survives unplug | All restored | | |
+| 19.9 | X-SurfaceSettings | Get, Set, notify, ChannelList | | |
