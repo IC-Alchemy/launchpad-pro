@@ -63,10 +63,10 @@ E2E_TEST(1, "T1-F0-01", "Mixed C99/C++20 extern C ABI, identity/PE resources, an
 }
 
 E2E_TEST(1, "T1-F0-02", "Baseline scales module SCALES table, pitch mapping, and role colors") {
-	E2E_CHECK_EQ(SCALE_COUNT, 61);
+	E2E_CHECK_EQ(SCALE_COUNT, 56);
 	E2E_CHECK(std::strcmp(SCALES[0].name, "Major") == 0);
 	E2E_CHECK_EQ(SCALES[0].n, 7u);
-	E2E_CHECK(std::strcmp(SCALES[11].name, "Minor Pentatonic") == 0);
+	E2E_CHECK(std::strcmp(SCALES[11].name, "Guitar Minor Pentatonic") == 0);
 	E2E_CHECK_EQ(SCALES[11].n, 5u);
 
 	struct scale_ctx ctx = {0, 0, 3, LAYOUT_INKEY_4THS, 0, TUNING_DEFAULT_ID};  // C Major, octave 3

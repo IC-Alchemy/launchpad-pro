@@ -177,8 +177,8 @@ static void test_pe_fixed_resources(void)
 
 	render(CI_PE_TUNING_LIST, &s, "", buf, sizeof buf);
 	CHECK(strncmp(buf, "[{\"id\":0,\"name\":\"12-EDO (Standard)\",\"degrees\":12},", 47) == 0);
-	CHECK(strstr(buf, "{\"id\":1,\"name\":\"24-EDO Quarter-Tone\",\"degrees\":24,\"scales\":[32,33,34,35,31]}") != 0);
-	CHECK(strstr(buf, "{\"id\":131,\"name\":\"Carlos Gamma\",\"degrees\":1,\"scales\":[31]}]") != 0);
+	CHECK(strstr(buf, "{\"id\":1,\"name\":\"24-EDO Quarter-Tone\",\"degrees\":24,\"scales\":[27,28,29,30,26]}") != 0);
+	CHECK(strstr(buf, "{\"id\":131,\"name\":\"Carlos Gamma\",\"degrees\":1,\"scales\":[26]}]") != 0);
 	CHECK_EQ(ci_pe_lookup("X-TuningList", 12), CI_PE_TUNING_LIST);
 	CHECK(!ci_pe_can_set(CI_PE_TUNING_LIST));
 
@@ -281,7 +281,7 @@ static void test_pe_set_rules(void)
 	/* any bad field rejects the whole Set and changes nothing */
 	before = s;
 	static const char *const BAD_SCALE[] = {
-		"{\"scale\":6,\"root\":12}", "{\"root\":-1}", "{\"scale\":61}", "{\"scale\":31}",
+		"{\"scale\":6,\"root\":12}", "{\"root\":-1}", "{\"scale\":56}", "{\"scale\":31}",
 		"{\"tuning\":12}", "{\"tuning\":1,\"scale\":0}", "{\"a4Tenths\":4149}", "{\"a4Tenths\":4661}",
 		"{\"a4Tenths\":440.5}", "{\"octave\":8}",
 		"{\"layout\":\"diagonal\"}", "{\"layout\":2}", "{\"absoluteRoot\":1}", "{\"root\":\"3\"}",
@@ -309,10 +309,10 @@ static void test_pe_set_rules(void)
 	CHECK_EQ(s.tuning, 96);
 	CHECK_EQ(s.scale, 1);
 	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"tuning\":3,\"a4Tenths\":4320}", &s), CI_PE_STATUS_OK);
-	CHECK_EQ(s.scale, 39);
+	CHECK_EQ(s.scale, 34);
 	CHECK_EQ(s.a4_tenths, 4320);
-	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"scale\":40,\"tuning\":3}", &s), CI_PE_STATUS_OK);
-	CHECK_EQ(s.scale, 40);
+	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"scale\":35,\"tuning\":3}", &s), CI_PE_STATUS_OK);
+	CHECK_EQ(s.scale, 35);
 	CHECK_EQ(apply(CI_PE_SCALE_SETTINGS, "{\"tuning\":0}", &s), CI_PE_STATUS_OK);
 	CHECK_EQ(s.scale, 0);
 	settings_defaults(&s);

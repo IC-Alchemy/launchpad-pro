@@ -18,7 +18,7 @@ Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launc
 | 1 | USB MIDI 2.0 transport: new descriptors (alt 0 MIDI 1.0, alt 1 UMP), Group Terminal Blocks, UMP stream discovery, DIN bridge | **Done, tested on hardware.** Results in `docs/checkpoint-1-results.md`. Three checks (5b, 6a, 6c) were deferred to stage 4. |
 | 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
 | 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
-| 2c | Intonation: Pico2Seq's 29 tunings (equal, just, historical temperaments, Indian, xenharmonic), 61 scales, Tuning page, A4 reference, MIDI 2.0 pitch attribute on notes | **Done and host-tested.** Hardware check pending (section 18 of `docs/checkpoint-2-instrument.md`). |
+| 2c | Intonation: Pico2Seq's 29 tunings (equal, just, historical temperaments, Indian, xenharmonic), 56 scales, Tuning page, A4 reference, MIDI 2.0 pitch attribute on notes | **Done and host-tested.** Hardware check pending (section 18 of `docs/checkpoint-2-instrument.md`). |
 | 2d | Four colour palettes (root, 3rd and 5th each in their own colour) and the split surface (two halves, two palettes, two MIDI channels), all in Property Exchange too | **Done and host-tested.** Hardware check pending (section 19 of `docs/checkpoint-2-instrument.md`). |
 | 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery, Endpoint Inquiry and Property Exchange (Get, Set, Subscribe) implemented and host-tested.** Hardware check with MIDI2Sound pending. |
 | 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
@@ -117,7 +117,7 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 | `ResourceList` | yes | | | The resources below, with JSON schemas for the two settings resources |
 | `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
 | `ChannelList` | yes | | | The Standalone Port and its MIDI channel. X lists "Standalone Lower" and "Standalone Upper". Y lists "Standalone Left" and "Standalone Right". |
-| `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 60), `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
+| `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 55), an index into the current `X-ScaleList`, `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
 | `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
 | `X-ScaleList` | yes | | | The 61 scale names, in `scale` order |
 | `X-TuningList` | yes | | | The 29 tunings: `id`, `name`, `degrees`, and `scales` (the scales it offers, in menu order; left out for twelve-note tunings, which offer scales 0 to 30) |

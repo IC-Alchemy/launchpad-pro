@@ -3,15 +3,15 @@
 
 #include <stdint.h>
 
-/* 0..30 are twelve-note scales (semitone steps), offered by every
- * twelve-note tuning; 31 is All Degrees (every degree of any tuning); 32..60
- * are Pico2Seq's tuned scales, whose steps are degrees of one tuning.
- * Indexes are part of the saved settings and of X-ScaleSettings: append
- * only. */
-#define SCALE_COUNT 61
-#define SCALE_TWELVE_COUNT 31
-#define SCALE_CHROMATIC 30
-#define SCALE_ALL_DEGREES 31
+/* Twelve-note scales first, then All Degrees, then tuning-specific scales.
+ * Indexes are used by saved settings and X-ScaleSettings. */
+#define SCALE_COUNT 56
+#define SCALE_HARMONIC_MINOR 15
+#define SCALE_PHRYGIAN_DOMINANT 19
+#define SCALE_CHROMATIC 25
+#define SCALE_TWELVE_COUNT (SCALE_CHROMATIC + 1)
+#define SCALE_ALL_DEGREES SCALE_TWELVE_COUNT
+#define SCALE_MAQAM_RAST (SCALE_ALL_DEGREES + 1)
 
 enum layout {
 	LAYOUT_INKEY_4THS,

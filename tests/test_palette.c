@@ -49,8 +49,8 @@ static void test_palette_lightness_order(void)
 		/* root and fifth clearly brighter than everything else: 1.5x the
 		 * third's luminance is about 12 L* at the third's level */
 		CHECK(luma(third) * 3 < bright * 2);
-		/* the fifth is at least as bright as the root */
-		CHECK(luma(fifth) >= luma(root));
+		/* the bright pair is also distinguishable by lightness */
+		CHECK(luma(fifth) * 2 > luma(root) * 3);
 	}
 }
 
@@ -66,6 +66,12 @@ static void test_palette_roles_distinct(void)
 		for (a = ROLE_OFF; a < ROLE_COUNT; a++)
 			for (b = (uint8_t)(a + 1); b < ROLE_COUNT; b++)
 				CHECK(!same(palette_rgb(p, (enum role)a), palette_rgb(p, (enum role)b)));
+		/* Playable roles stay in the blue family; neutral states are exempt. */
+		for (a = ROLE_SCALE; a < ROLE_COUNT; a++) {
+			const uint8_t *c = palette_rgb(p, (enum role)a);
+
+			CHECK(c[2] > c[0] && c[2] > c[1]);
+		}
 		/* the root drives one channel fully */
 		CHECK_EQ(max3(root), 63);
 		/* root and fifth are a related pair, but visibly apart */
