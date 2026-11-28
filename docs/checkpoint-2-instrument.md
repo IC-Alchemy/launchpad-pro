@@ -93,7 +93,7 @@ Scale page (button 95, the default menu page):
 | 7 | 72, 73, 75, 76, 77 | Root C#, D#, F#, G#, A# | green |
 | 6 | 61 to 67 | Root C, D, E, F, G, A, B | green |
 | 5 | 51 to 58 | Octave 0 to 7 | red |
-| 4, 3, 2, 1 | 41 to 48, 31 to 38, 21 to 28, 11 to 17 | The scales the current tuning offers, in order. In the twelve-note tunings these are scales 1 to 31: Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Diminished; Whole-half, Whole Tone, Minor Blues, Minor Pentatonic, Major Pentatonic, Harmonic Minor, Melodic Minor, Super Locrian; Bhairav, Hungarian Minor, Minor Gypsy, Hirojoshi, In-Sen, Iwato, Kumoi, Pelog; Spanish, Phrygian Dominant, Lydian Dominant, Marwa Thaat, Poorvi Thaat, Todi Thaat, Chromatic. Other tunings show their own few scales from pad 41 on. | blue |
+| 4, 3, 2, 1 | 41 to 48, 31 to 38, 21 to 28, 11 to 12 | The scales the current tuning offers, in order. Twelve-note tunings offer 26 scales, starting with Major and ending with Chromatic. The seven harmonic-minor modes run from pad 38 through pad 26. Other tunings show their own scales from pad 41 on. | blue |
 
 Surface page (button 98). The second half's settings are on top and the
 primary half's below. The left round buttons work here and on the play page.

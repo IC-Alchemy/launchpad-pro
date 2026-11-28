@@ -42,11 +42,11 @@ static void test_record_round_trip(void)
 	s.velocity_mode = VEL_TWO_STAGE; s.velocity_curve = CURVE_HARD;
 	s.pressure_mode = PRESS_OFF; s.pressure_threshold = THRESH_HIGH;
 	s.din_mirror = 1; s.channel = 15; s.pressure_smoothing = SMOOTH_HEAVY;
-	s.tuning = 96; s.scale = 27; s.a4_tenths = 4321;
+	s.tuning = 96; s.scale = 22; s.a4_tenths = 4321;
 	s.palette = PALETTE_CONTRAST; s.split_mode = SPLIT_Y; s.upper_palette = PALETTE_GLACIER; s.upper_channel = 9;
 	settings_encode(&s, rec);
 	CHECK_EQ(SETTINGS_RECORD_LEN, 25);
-	CHECK_MEM(rec, "LPM2\x05", 5);
+	CHECK_MEM(rec, "LPM2\x06", 5);
 	CHECK_EQ(rec[16], SMOOTH_HEAVY);
 	CHECK_EQ(rec[17], 96);
 	CHECK_EQ(rec[18], 4321 & 0xFF);
@@ -112,7 +112,7 @@ static void test_v1_record_loads_with_default_smoothing(void)
 	settings_load(&s);
 	settings_defaults(&d);
 	CHECK_EQ(s.root, 7);
-	CHECK_EQ(s.scale, 24);
+	CHECK_EQ(s.scale, 0);
 	CHECK_EQ(s.octave, 2);
 	CHECK_EQ(s.channel, 9);
 	CHECK_EQ(s.din_mirror, 1);
@@ -139,7 +139,7 @@ static void test_v2_record_loads_twelve_edo(void)
 	memcpy(io_flash, v2, 18);
 	settings_load(&s);
 	CHECK_EQ(s.root, 7);
-	CHECK_EQ(s.scale, 24);
+	CHECK_EQ(s.scale, 0);
 	CHECK_EQ(s.pressure_smoothing, 3);
 	CHECK_EQ(s.tuning, 0);
 	CHECK_EQ(s.a4_tenths, 4400);
@@ -161,7 +161,7 @@ static void test_v3_record_loads_without_split(void)
 	memcpy(io_flash, v3, 21);
 	settings_load(&s);
 	CHECK_EQ(s.root, 7);
-	CHECK_EQ(s.scale, 27);
+	CHECK_EQ(s.scale, 22);
 	CHECK_EQ(s.channel, 9);
 	CHECK_EQ(s.tuning, 96);
 	CHECK_EQ(s.a4_tenths, 4321);
@@ -242,7 +242,7 @@ static void test_tuning_fields_validated(void)
 	CHECK(!settings_valid(&s));
 	s.tuning = 1;  /* 24-EDO doesn't offer Major */
 	CHECK(!settings_valid(&s));
-	s.scale = 32;  /* Maqam Rast */
+	s.scale = SCALE_MAQAM_RAST;  /* Maqam Rast */
 	CHECK(settings_valid(&s));
 	s.a4_tenths = 4149;
 	CHECK(!settings_valid(&s));
@@ -252,10 +252,10 @@ static void test_tuning_fields_validated(void)
 	CHECK(!settings_valid(&s));
 	/* the scale a tuning change keeps */
 	CHECK_EQ(settings_scale_for(0, 5), 5);
-	CHECK_EQ(settings_scale_for(1, 5), 32);
+	CHECK_EQ(settings_scale_for(1, 5), SCALE_MAQAM_RAST);
 	CHECK_EQ(settings_scale_for(96, 1), 1);
-	CHECK_EQ(settings_scale_for(96, 7), 16);
-	CHECK_EQ(settings_scale_for(97, 31), 16);
+	CHECK_EQ(settings_scale_for(96, 7), SCALE_PHRYGIAN_DOMINANT);
+	CHECK_EQ(settings_scale_for(97, SCALE_ALL_DEGREES), SCALE_PHRYGIAN_DOMINANT);
 	CHECK_EQ(settings_scale_for(129, 0), SCALE_ALL_DEGREES);
 }
 

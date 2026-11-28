@@ -123,7 +123,7 @@ static void test_pitch79(void)
 
 static void test_tuned_layouts(void)
 {
-	struct scale_ctx c = {0, 32, 4, LAYOUT_INKEY_4THS, 0, 1}; /* 24-EDO Rast on C */
+	struct scale_ctx c = {0, SCALE_MAQAM_RAST, 4, LAYOUT_INKEY_4THS, 0, 1}; /* 24-EDO Rast on C */
 
 	CHECK_EQ(scale_pad_pitch(&c, 11), 60);
 	CHECK_EQ(scale_pad_pitch(&c, 12), 64);

@@ -62,11 +62,11 @@ static int count_kind(int from, char k)
 static void test_play_page_colours_default(void)
 {
 	setup();
-	CHECK(led_is(11, 0, 16, 63));  /* C: root */
+	CHECK(led_is(11, 0, 19, 63));  /* C: root */
 	/* the default palette, Ocean */
-	CHECK(led_is(12, 0, 4, 15));   /* D: scale */
-	CHECK(led_is(13, 13, 6, 0));   /* E: 3rd */
-	CHECK(led_is(15, 0, 40, 58));  /* G: 5th */
+	CHECK(led_is(12, 0, 3, 10));   /* D: scale */
+	CHECK(led_is(13, 5, 8, 15));   /* E: 3rd */
+	CHECK(led_is(15, 0, 44, 58));  /* G: 5th */
 	CHECK(led_is(98, 0, 0, 0));    /* the Surface page button: menu only */
 	CHECK(led_is(91, 6, 6, 6));
 	CHECK(led_is(92, 6, 6, 6));
@@ -92,7 +92,7 @@ static void test_initial_draw_clears_unused_leds(void)
 	CHECK(led_is(96, 0, 0, 0));
 	CHECK(led_is(97, 0, 0, 0));
 	CHECK(led_is(98, 0, 0, 0));
-	CHECK(led_is(11, 0, 16, 63));
+	CHECK(led_is(11, 0, 19, 63));
 }
 
 static void test_tuned_notes_carry_their_pitch(void)
@@ -111,7 +111,7 @@ static void test_tuned_notes_carry_their_pitch(void)
 	 * DIN gets the plain note */
 	s = *ui_settings();
 	s.tuning = 1;
-	s.scale = 32;
+	s.scale = SCALE_MAQAM_RAST;
 	s.din_mirror = 1;
 	ui_apply_settings(&s, T0 + 30);
 	io_n = 0;
@@ -164,11 +164,11 @@ static void test_same_pitch_pads_light_together(void)
 	CHECK(led_is(18, 63, 63, 63));
 	CHECK(led_is(25, 63, 63, 63));
 	CHECK(led_is(32, 63, 63, 63));
-	CHECK(led_is(11, 0, 16, 63));  /* 60 is not sounding */
+	CHECK(led_is(11, 0, 19, 63));  /* 60 is not sounding */
 	ui_pad(25, 0, T0 + 20);
-	CHECK(led_is(18, 0, 16, 63));
-	CHECK(led_is(25, 0, 16, 63));
-	CHECK(led_is(32, 0, 16, 63));
+	CHECK(led_is(18, 0, 19, 63));
+	CHECK(led_is(25, 0, 19, 63));
+	CHECK(led_is(32, 0, 19, 63));
 }
 
 static void test_peak_window_lights_when_sounding(void)
@@ -176,7 +176,7 @@ static void test_peak_window_lights_when_sounding(void)
 	setup();
 	ui_pad(11, 100, T0);
 	CHECK_EQ(io_n, 0);
-	CHECK(led_is(11, 0, 16, 63));  /* capturing: not sounding yet */
+	CHECK(led_is(11, 0, 19, 63));  /* capturing: not sounding yet */
 	ui_poll(T0 + PEAK_WINDOW_MS);
 	CHECK_EQ(count_kind(0, 'N'), 1);
 	CHECK(led_is(11, 63, 63, 63));
@@ -193,7 +193,7 @@ static void test_octave_arrows_clamp(void)
 	for (i = 0; i < 9; i++)
 		tap(92, T0 + 10 + i);
 	CHECK_EQ(ui_settings()->octave, 0);
-	CHECK(led_is(11, 0, 16, 63));
+	CHECK(led_is(11, 0, 19, 63));
 	CHECK_EQ(io_n, 0);
 }
 
@@ -206,7 +206,7 @@ static void test_root_arrows_wrap(void)
 	CHECK_EQ(ui_settings()->root, 0);
 	tap(94, T0 + 2);
 	CHECK_EQ(ui_settings()->root, 1);
-	CHECK(led_is(11, 0, 16, 63));  /* the bottom-left pad is still the root */
+	CHECK(led_is(11, 0, 19, 63));  /* the bottom-left pad is still the root */
 }
 
 static void test_arrows_keep_held_note(void)
@@ -234,7 +234,7 @@ static void test_setup_tap_opens_and_closes(void)
 	CHECK_EQ(ui_menu_open(), 0);
 	ui_setup(0, T0 + 1500);       /* a long release of a closing press */
 	CHECK_EQ(ui_menu_open(), 0);
-	CHECK(led_is(11, 0, 16, 63));
+	CHECK(led_is(11, 0, 19, 63));
 	CHECK(led_is(91, 6, 6, 6));
 }
 
@@ -245,7 +245,7 @@ static void test_setup_peek(void)
 	CHECK_EQ(ui_menu_open(), 1);
 	ui_setup(0, T0 + 400);
 	CHECK_EQ(ui_menu_open(), 0);
-	CHECK(led_is(11, 0, 16, 63));
+	CHECK(led_is(11, 0, 19, 63));
 }
 
 static void test_menu_entry_releases_notes(void)
@@ -278,7 +278,8 @@ static void test_menu_drawing(void)
 	CHECK(led_is(51, 8, 0, 0));
 	CHECK(led_is(41, 0, 0, 63));   /* Major */
 	CHECK(led_is(11, 0, 0, 8));    /* scale 24 */
-	CHECK(led_is(17, 0, 0, 8));    /* scale 30, Chromatic */
+	CHECK(led_is(12, 0, 0, 8));    /* Chromatic */
+	CHECK(led_is(13, 0, 0, 0));
 	CHECK(led_is(18, 0, 0, 0));
 	CHECK(led_is(86, 63, 24, 0));  /* In-key 4ths */
 	CHECK(led_is(83, 8, 3, 0));
@@ -309,7 +310,7 @@ static void test_tuning_page(void)
 	/* a tuning that doesn't offer the scale takes its default */
 	tap(82, T0 + 30);
 	CHECK_EQ(ui_settings()->tuning, 1);
-	CHECK_EQ(ui_settings()->scale, 32);
+	CHECK_EQ(ui_settings()->scale, SCALE_MAQAM_RAST);
 	CHECK(led_is(82, 0, 48, 63));
 	CHECK(led_is(81, 0, 6, 8));
 
@@ -338,9 +339,9 @@ static void test_tuning_page(void)
 	CHECK(led_is(45, 0, 0, 8));    /* All Degrees */
 	CHECK(led_is(46, 0, 0, 0));
 	tap(42, T0 + 130);
-	CHECK_EQ(ui_settings()->scale, 33);
+	CHECK_EQ(ui_settings()->scale, SCALE_MAQAM_RAST + 1);
 	tap(46, T0 + 140);
-	CHECK_EQ(ui_settings()->scale, 33);
+	CHECK_EQ(ui_settings()->scale, SCALE_MAQAM_RAST + 1);
 
 	/* back to 12-EDO keeps a scale it offers, else Major */
 	tap(97, T0 + 150);
@@ -659,7 +660,7 @@ static void test_apply_settings_change(void)
 	CHECK_EQ(io_n, 2);
 	CHECK_EQ(io_log[1].kind, 'F');
 	CHECK_EQ(ui_settings()->root, 2);
-	CHECK(led_is(11, 0, 16, 63));     /* redrawn, no longer white */
+	CHECK(led_is(11, 0, 19, 63));     /* redrawn, no longer white */
 	ui_pad(11, 0, T0 + 40);           /* released by the apply: silent */
 	CHECK_EQ(io_n, 2);
 	/* the save waits for quiet after the last pad event (the release at
@@ -671,13 +672,13 @@ static void test_apply_settings_change(void)
 }
 
 /* Ocean and Contrast colours, from instrument/palette.c */
-#define OCEAN_ROOT   0, 16, 63
-#define OCEAN_THIRD  13, 6, 0
-#define OCEAN_FIFTH  0, 40, 58
-#define OCEAN_SCALE  0, 4, 15
-#define CONTRAST_ROOT   63, 16, 0
-#define CONTRAST_FIFTH  63, 40, 0
-#define CONTRAST_SCALE  10, 3, 0
+#define OCEAN_ROOT   0, 19, 63
+#define OCEAN_THIRD  5, 8, 15
+#define OCEAN_FIFTH  0, 44, 58
+#define OCEAN_SCALE  0, 3, 10
+#define CONTRAST_ROOT   4, 17, 63
+#define CONTRAST_FIFTH  0, 58, 63
+#define CONTRAST_SCALE  1, 3, 11
 
 static void split_on(uint8_t upper_channel, uint32_t now)
 {
@@ -821,10 +822,10 @@ static void test_surface_page(void)
 	/* lower palette on row 1, upper on row 8: the chosen one in its root
 	 * colour, the others at an eighth */
 	CHECK(led_is(11, OCEAN_ROOT));
-	CHECK(led_is(12, 8, 5, 0));       /* Citrus, dim */
+	CHECK(led_is(12, 2, 2, 8));       /* Citrus, dim */
 	CHECK(led_is(84, CONTRAST_ROOT));
 	CHECK(led_is(85, 0, 0, 0));
-	CHECK(led_is(81, 0, 2, 8));       /* Ocean, not chosen */
+	CHECK(led_is(81, 0, 3, 8));       /* Ocean, not chosen */
 	/* previews at the seam: row 5 upper, row 4 lower */
 	CHECK(led_is(41, OCEAN_ROOT));
 	CHECK(led_is(42, OCEAN_SCALE));
@@ -881,9 +882,9 @@ static void test_left_buttons_on_play_page(void)
 	setup();
 	zero_latency(T0);
 	CHECK(led_is(50, OCEAN_ROOT));
-	CHECK(led_is(40, 8, 5, 0));
-	CHECK(led_is(30, 0, 7, 8));
-	CHECK(led_is(20, 8, 2, 0));
+	CHECK(led_is(40, 2, 2, 8));
+	CHECK(led_is(30, 0, 4, 8));
+	CHECK(led_is(20, 1, 3, 8));
 	CHECK(led_is(10, 0, 0, 0));
 
 	/* A palette tap recolours the grid while held notes keep sounding. */
@@ -968,9 +969,9 @@ static void test_transport_change_forgets_held_notes(void)
 	mark = io_n;
 	ui_transport_changed(T0 + 20);
 	CHECK_EQ(io_n, mark);              /* the transport ended the note */
-	CHECK(led_is(18, 0, 16, 63));
-	CHECK(led_is(25, 0, 16, 63));
-	CHECK(led_is(32, 0, 16, 63));
+	CHECK(led_is(18, 0, 19, 63));
+	CHECK(led_is(25, 0, 19, 63));
+	CHECK(led_is(32, 0, 19, 63));
 	ui_poll(T0 + 30);
 	ui_pad(25, 0, T0 + 40);            /* the held pad's release: silent */
 	CHECK_EQ(io_n, mark);

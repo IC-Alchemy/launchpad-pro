@@ -9,7 +9,7 @@
 #include "instrument/palette.h"
 
 /* The schemas below hard-code the ranges: keep them in step. */
-typedef char ci_pe_scale_count_is_61[(SCALE_COUNT == 61) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_scale_count_is_56[(SCALE_COUNT == 56) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_thresh_count_is_4[(THRESH_COUNT == 4) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_a4_range[(A4_TENTHS_MIN == 4150 && A4_TENTHS_MAX == 4660) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
@@ -28,7 +28,7 @@ static const char RESOURCE_LIST[] =
 	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Scale\",\"type\":\"object\",\"properties\":{"
 	"\"root\":{\"title\":\"Root (0 = C)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":11},"
-	"\"scale\":{\"title\":\"Scale (X-ScaleList index; one the tuning offers)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":60},"
+	"\"scale\":{\"title\":\"Scale (X-ScaleList index; one the tuning offers)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":55},"
 	"\"octave\":{\"title\":\"Octave\",\"type\":\"integer\",\"minimum\":0,\"maximum\":7},"
 	"\"layout\":{\"title\":\"Layout\",\"type\":\"string\",\"enum\":[\"inKey4ths\",\"inKey3rds\","
 	"\"inKeySequential\",\"chromatic4ths\",\"chromaticGuitar\"]},"
@@ -215,8 +215,8 @@ static void render_settings(uint8_t res, const struct settings *s, struct ci_jso
 }
 
 /* [{"id":0,"name":"12-EDO (Standard)","degrees":12},
- *  {"id":1,"name":"24-EDO Quarter-Tone","degrees":24,"scales":[32,33,34,35,31]},...]
- * No "scales": the tuning offers every twelve-note scale, 0..30. */
+ *  {"id":1,"name":"24-EDO Quarter-Tone","degrees":24,"scales":[27,28,29,30,26]},...]
+ * No "scales": the tuning offers every twelve-note scale, 0..25. */
 static void tuning_list(struct ci_json_out *o)
 {
 	uint8_t i, j;

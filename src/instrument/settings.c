@@ -87,7 +87,7 @@ void settings_encode(const struct settings *s, uint8_t out[SETTINGS_RECORD_LEN])
 	out[1] = 'P';
 	out[2] = 'M';
 	out[3] = '2';
-	out[4] = 5;
+	out[4] = 6;
 	to_bytes(s, out + 5);
 	for (i = 0; i < SETTINGS_RECORD_LEN - 1; i++)
 		sum = (uint8_t)(sum + out[i]);
@@ -102,7 +102,7 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 
 	if (in[0] != 'L' || in[1] != 'P' || in[2] != 'M' || in[3] != '2')
 		return 0;
-	if (in[4] == 5 || in[4] == 4)
+	if (in[4] >= 4 && in[4] <= 6)
 		len = SETTINGS_RECORD_LEN;
 	else if (in[4] == 3)
 		len = SETTINGS_RECORD_V3_LEN;
@@ -147,11 +147,29 @@ uint8_t settings_decode(const uint8_t in[SETTINGS_RECORD_LEN], struct settings *
 			t.upper_palette = v4_palette[in[22]];
 		t.split_mode = in[21] ? SPLIT_X : SPLIT_OFF;
 		t.upper_channel = in[23];
-	} else if (in[4] == 5) {
+	} else if (in[4] >= 5) {
 		t.palette = in[20];
 		t.split_mode = in[21];
 		t.upper_palette = in[22];
 		t.upper_channel = in[23];
+	}
+	if (in[4] < 6) {
+		/* Versions 1–5 stored the previous scale table's indices. */
+		static const uint8_t old_scales[] = {
+			13, SCALE_HARMONIC_MINOR, 14, 0xFF, 0xFF, 0xFF,
+			SCALE_PHRYGIAN_DOMINANT, 0xFF, 0xFF, 0xFF, 12, 0xFF,
+			0xFF, SCALE_PHRYGIAN_DOMINANT, 0xFF, 22, 23, 24,
+		};
+
+		if (t.scale >= 61)
+			return 0;
+		if (t.scale >= 30)
+			t.scale = (uint8_t)(SCALE_CHROMATIC + t.scale - 30);
+		else if (t.scale >= 12) {
+			t.scale = old_scales[t.scale - 12];
+			if (t.scale == 0xFF)
+				t.scale = settings_scale_for(t.tuning, t.scale);
+		}
 	}
 	if (!settings_valid(&t))
 		return 0;

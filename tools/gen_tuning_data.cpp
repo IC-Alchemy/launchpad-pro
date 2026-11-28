@@ -8,8 +8,8 @@
 //     $P/tuning/TuningScales.cpp $P/scales/scales.cpp -o build/gen_tuning_data
 //   build/gen_tuning_data > src/scales/tuning_data.c
 //
-// Pico2Seq's scale numbers are mapped to the firmware's 61-entry table: its
-// 18 classic scales to the firmware's existing entries, its tuned rows to 32 on.
+// Pico2Seq's scale numbers are mapped to the firmware's 56-entry table: its
+// classic scales to the revised catalog (or -1 if removed), tuned rows to 27 on.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -21,9 +21,9 @@ using namespace tuning;
 int main() {
   const double kFine = 32768.0 / 100.0;
   int fw[SCALES_COUNT];
-  const int classic[18] = {0, 2, 5, 4, 3, 1, 6, 11, 25, 26, 13, 9, 30, 31, 16, 27, 28, 29};
+  const int classic[18] = {0, 2, 5, 4, 3, 1, 6, 11, 19, -1, 15, 9, 25, 26, 19, 22, 23, 24};
   for (int i = 0; i < 18; ++i) fw[i] = classic[i];
-  for (int i = 18; i < (int)SCALES_COUNT; ++i) fw[i] = 32 + (i - 18);
+  for (int i = 18; i < (int)SCALES_COUNT; ++i) fw[i] = 27 + (i - 18);
   const char *fam[5] = {"TUNING_EQUAL", "TUNING_JUST", "TUNING_TEMPERAMENT", "TUNING_INDIAN", "TUNING_XENO"};
   printf("/* Generated from Pico2Seq's tuning library (src/pico2seq-core/tuning), MIT licence.\n"
          " * Pitches are fine units: 32768 per 12-EDO semitone. */\n"
@@ -50,7 +50,14 @@ int main() {
     if (!twelve) {
       const ScaleSet set = scaleSet(tu.id);
       printf("static const uint8_t S%d[%d] = {", tu.id, set.count);
-      for (int i = 0; i < set.count; ++i) printf("%s%d", i ? ", " : "", fw[set.scales[i]]);
+      for (int i = 0; i < set.count; ++i) {
+        const int scale = fw[set.scales[i]];
+        if (scale < 0) {
+          fprintf(stderr, "Tuning %d references removed scale %d\n", tu.id, set.scales[i]);
+          return EXIT_FAILURE;
+        }
+        printf("%s%d", i ? ", " : "", scale);
+      }
       printf("};\n");
     }
   }
@@ -64,7 +71,7 @@ int main() {
     snprintf(chroma, sizeof chroma, tu.chroma ? "C%d" : "0", tu.id);
     snprintf(set, sizeof set, twelve ? "0" : "S%d", tu.id);
     int nset = twelve ? 0 : scaleSet(tu.id).count;
-    int def = twelve ? (tu.family == Family::Indian ? 16 : 0) : fw[scaleSet(tu.id).scales[0]];
+    int def = twelve ? (tu.family == Family::Indian ? 19 : 0) : fw[scaleSet(tu.id).scales[0]];
     const double exact = double(tu.periodCents) * kFine;
     long x256 = lround(exact * 256.0);
     printf("\t{%3d, %-19s%2d, %2d, %3d, %6ld, %3ld, %-4s, %-4s, %-4s, \"%s\"},\n", tu.id, (std::string(fam[(int)tu.family]) + ",").c_str(),

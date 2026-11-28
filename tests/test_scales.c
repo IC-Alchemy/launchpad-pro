@@ -136,9 +136,24 @@ static void test_scale_table_sane(void)
 		CHECK(s->steps[s->n - 1] < (s->degrees ? s->degrees : 12));
 	}
 	CHECK(strcmp(SCALES[0].name, "Major") == 0);
-	CHECK(strcmp(SCALES[24].name, "Spanish") == 0);
+	CHECK(strcmp(SCALES[24].name, "Todi Thaat") == 0);
 	CHECK(strcmp(SCALES[SCALE_CHROMATIC].name, "Chromatic") == 0);
 	CHECK(strcmp(SCALES[SCALE_ALL_DEGREES].name, "All Degrees") == 0);
+}
+
+static void test_harmonic_minor_modes(void)
+{
+	static const uint8_t harmonic_minor[] = {0, 2, 3, 5, 7, 8, 11};
+	int mode, step;
+
+	for (mode = 0; mode < 7; mode++) {
+		const struct scale_def *s = &SCALES[SCALE_HARMONIC_MINOR + mode];
+
+		CHECK_EQ(s->n, 7);
+		for (step = 0; step < 7; step++)
+			CHECK_EQ(s->steps[step],
+			         (harmonic_minor[(mode + step) % 7] + 12 - harmonic_minor[mode]) % 12);
+	}
 }
 
 void test_scales_all(void)
@@ -155,4 +170,5 @@ void test_scales_all(void)
 	RUN(test_roles);
 	RUN(test_roles_follow_the_scale_steps);
 	RUN(test_scale_table_sane);
+	RUN(test_harmonic_minor_modes);
 }
