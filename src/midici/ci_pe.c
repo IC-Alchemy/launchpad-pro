@@ -13,7 +13,7 @@ typedef char ci_pe_scale_count_is_56[(SCALE_COUNT == 56) ? 1 : -1] __attribute__
 typedef char ci_pe_thresh_count_is_4[(THRESH_COUNT == 4) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_a4_range[(A4_TENTHS_MIN == 4150 && A4_TENTHS_MAX == 4660) ? 1 : -1] __attribute__((unused));
 typedef char ci_pe_layout_count_is_5[(LAYOUT_COUNT == 5) ? 1 : -1] __attribute__((unused));
-typedef char ci_pe_palette_count_is_4[(PALETTE_COUNT == 4) ? 1 : -1] __attribute__((unused));
+typedef char ci_pe_palette_count_is_6[(PALETTE_COUNT == 6) ? 1 : -1] __attribute__((unused));
 
 static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
 	"ResourceList", "DeviceInfo", "ChannelList", "X-ScaleSettings", "X-PlayOptions", "X-ScaleList",
