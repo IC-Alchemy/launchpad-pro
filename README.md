@@ -19,7 +19,7 @@ Built on Novation's [open Launchpad Pro firmware](https://github.com/dvhdr/launc
 | 2 | Scale instrument: scale engine, five layouts, 25 scales, velocity modes and curves, poly/channel pressure from the raw ADC, Setup menu, settings saved to flash | **Done and host-tested. Hardware checkpoint pending.** Procedure in `docs/checkpoint-2-instrument.md`. |
 | 2b | Two-stage velocity (a fourth velocity mode) and a lower library press threshold | **Done and host-tested.** The thresholds are first guesses, to be tuned from the player's MIDI logs. |
 | 2c | Intonation: Pico2Seq's 29 tunings (equal, just, historical temperaments, Indian, xenharmonic), 56 scales, Tuning page, A4 reference, MIDI 2.0 pitch attribute on notes | **Done and host-tested.** Hardware check pending (section 18 of `docs/checkpoint-2-instrument.md`). |
-| 2d | Four colour palettes (root, 3rd and 5th each in their own colour) and the split surface (two halves, two palettes, two MIDI channels), all in Property Exchange too | **Done and host-tested.** Hardware check pending (section 19 of `docs/checkpoint-2-instrument.md`). |
+| 2d | Six colour palettes, three paired presets, and a split surface with a palette and MIDI channel for each half. Individual palettes and split settings are available through Property Exchange | **Done and host-tested.** Hardware check pending (section 19 of `docs/checkpoint-2-instrument.md`). |
 | 3 | MIDI-CI with Property Exchange (DAW/editor discovery, edit settings from the PC) | **Discovery, Endpoint Inquiry and Property Exchange (Get, Set, Subscribe) implemented and host-tested.** Hardware check with MIDI2Sound pending. |
 | 4 | Final hardware pass, including MIDI-CI and the deferred stage 1 checks | Not started. |
 
@@ -32,16 +32,15 @@ The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash marg
   octave, 93/94 change the root.
 - **Left round buttons.** From the top, 80 selects X, 70 selects Y, and 60
   turns the split off. Buttons 50, 40, 30, and 20 select Ocean (blue), Citrus
-  (gold), Glacier (cyan), and Contrast (vermilion). The selected mode and
-  palette are brighter. The bottom button (10) is unused.
-- **Palettes.** Ocean is the default. Each colour role works the same way
-  across all four palettes. Root and fifth are the bright
-  pair: the root in the palette's own hue (no other role uses it), the fifth
-  in a neighbouring hue. The third is a dim contrasting hue. Other scale notes
-  are a faint tint of the root's hue, out-of-scale notes a faint grey. A
-  sounding pad is white. Lightness carries the meaning and hue backs it up,
-  so the roles still read with colour blindness, and Contrast keeps to the
-  orange/blue axis. Palette tables are in flash and use no RAM.
+  (gold), Glacier (teal), and Contrast (vermilion) for the primary zone.
+  The selected mode and palette are brighter. In either split mode, the
+  bottom-left round button (10) cycles both halves through Ocean / Contrast
+  (blue / vermilion), Glacier / Rose (teal / rose), and Citrus / Amethyst
+  (gold / violet).
+- **Palettes.** Ocean is the default. Each palette uses one hue family for all
+  lit note roles, including out-of-scale notes. The fifth is brightest, then
+  the root, third, other scale notes, and out-of-scale notes. A sounding pad
+  is white. Palette tables are in flash and use no RAM.
 - **Split.** X divides the grid between rows 4 and 5. Y divides it between
   columns 4 and 5. The primary palette and MIDI channel apply to the whole
   grid with Off selected, the lower half with X, or the left half with Y.
@@ -71,8 +70,9 @@ The app has 101 KB of flash and 20 KB of RAM. `make` prints the exact flash marg
   the Options page (velocity mode and curve, pressure mode and threshold, DIN
   mirror, MIDI channel), button 97 opens the Tuning page (tuning and A4),
   button 98 opens the Surface page for setting and previewing each half's
-  palette and selecting its channel. The left round buttons also work on
-  that page. The uppermost right-side round button (89) opens the MIDI-CI
+  palette and selecting its channel. The first six pads of rows 8 and 1 let
+  you choose any palette for the second and primary zones respectively. The
+  left round buttons also work on that page. The uppermost right-side round button (89) opens the MIDI-CI
   page and scans for peers; pad 11 rescans, and pads 21–28 show peer status.
   Settings are saved to flash 2 s after the last change, once no pad is
   being played.
@@ -128,7 +128,7 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 | `X-PlayOptions` | yes | full and partial | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
 | `X-ScaleList` | yes | | | 61 objects with a `name` field, in `scale` order |
 | `X-TuningList` | yes | | | The 29 tunings: `id`, `name`, `degrees`, and `scales` (the scales it offers, in menu order; left out for twelve-note tunings, which offer scales 0 to 30) |
-| `X-SurfaceSettings` | yes | full and partial | yes | `palette` and `upperPalette` (`ocean`, `citrus`, `glacier`, `contrast`), `splitMode` (`off`, `x`, `y`), `upperChannel` (1 to 16). The legacy `split` boolean is also accepted. The primary half's channel is `channel` in `X-PlayOptions` |
+| `X-SurfaceSettings` | yes | full and partial | yes | `palette` and `upperPalette` (`ocean`, `citrus`, `glacier`, `contrast`, `rose`, `amethyst`), `splitMode` (`off`, `x`, `y`), `upperChannel` (1 to 16). The legacy `split` boolean is also accepted. The primary half's channel is `channel` in `X-PlayOptions` |
 
 A partial Set uses `"setPartial":true` and JSON Pointer keys such as `"/root"`.
 Legacy Settings editors can still send a subset of plain keys. Both operations
