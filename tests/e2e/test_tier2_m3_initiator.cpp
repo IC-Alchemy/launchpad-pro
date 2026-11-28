@@ -881,7 +881,8 @@ E2E_TEST(2, "T2-F17-05", "CiAgent maxSysEx=64 (< 128 fallback) yields DeviceInfo
 	ms::WriteFourteenBitValue(&badReply[18], 1u);
 	ms::WriteFourteenBitValue(&badReply[20], 0x3FFFu);
 	wire.inject_sysex7_to_fw(0, badReply.data(), static_cast<uint16_t>(badReply.size()));
-	E2E_CHECK(wire.settle(64));
+	// The host can still be draining the discovery-time PE reads and subscriptions.
+	E2E_CHECK(wire.settle());
 	E2E_CHECK_EQ(fw.peer_count(), 1u);
 }
 
