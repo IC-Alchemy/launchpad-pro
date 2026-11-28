@@ -137,6 +137,7 @@ static void test_pe_lookup(void)
 	CHECK(ci_pe_can_set(CI_PE_SCALE_SETTINGS) && ci_pe_can_set(CI_PE_PLAY_OPTIONS));
 	CHECK(!ci_pe_can_set(CI_PE_DEVICE_INFO) && !ci_pe_can_set(CI_PE_RESOURCE_LIST));
 	CHECK(ci_pe_can_subscribe(CI_PE_PLAY_OPTIONS) && !ci_pe_can_subscribe(CI_PE_SCALE_LIST));
+	CHECK(ci_pe_can_subscribe(CI_PE_CHANNEL_LIST) && !ci_pe_can_set(CI_PE_CHANNEL_LIST));
 }
 
 static void test_pe_fixed_resources(void)
@@ -151,6 +152,7 @@ static void test_pe_fixed_resources(void)
 	CHECK_EQ(n, ci_pe_body_len(CI_PE_RESOURCE_LIST, &s, ""));
 	CHECK(buf[0] == '[' && buf[n - 1] == ']');
 	CHECK(strstr(buf, "\"resource\":\"DeviceInfo\"") != 0);
+	CHECK(strstr(buf, "\"resource\":\"ChannelList\",\"canSubscribe\":true") != 0);
 	CHECK(strstr(buf, "\"resource\":\"X-ScaleList\"") != 0);
 	CHECK(strstr(buf, "\"resource\":\"ResourceList\"") == 0);
 
@@ -171,7 +173,7 @@ static void test_pe_fixed_resources(void)
 
 	render(CI_PE_SCALE_LIST, &s, "", buf, sizeof buf);
 	CHECK(buf[0] == '[');
-	CHECK(strncmp(buf + 1, "\"", 1) == 0);
+	CHECK(strncmp(buf + 1, "{\"name\":", 8) == 0);
 	CHECK(strstr(buf, SCALES[0].name) != 0);
 	CHECK(strstr(buf, SCALES[SCALE_COUNT - 1].name) != 0);
 
@@ -405,12 +407,15 @@ static void test_pe_surface_settings(void)
 	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
 	CHECK(strcmp(buf, "[{\"title\":\"Standalone Left\",\"channel\":3},"
 	                  "{\"title\":\"Standalone Right\",\"channel\":7}]") == 0);
+	s.upper_channel = s.channel;
+	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
+	CHECK(strcmp(buf, "[{\"title\":\"Standalone Port\",\"channel\":3}]") == 0);
 
 	/* the schema lists every palette by its name */
 	{
 		static char list[4096];
 		render(CI_PE_RESOURCE_LIST, &s, "", list, sizeof list);
-		CHECK(strstr(list, "{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"full\",\"canSubscribe\":true,") != 0);
+		CHECK(strstr(list, "{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,") != 0);
 		for (uint8_t p = 0; p < PALETTE_COUNT; p++) {
 			char quoted[24];
 			snprintf(quoted, sizeof quoted, "\"%s\"", palette_name(p));

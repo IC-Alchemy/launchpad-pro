@@ -36,10 +36,13 @@ typedef char ci_pe_resources_fit_mask[(CI_PE_RESOURCE_COUNT <= 8) ? 1 : -1];
 
 /* PE status codes used in reply headers */
 #define CI_PE_STATUS_OK 200
+#define CI_PE_STATUS_TOO_MANY 343
 #define CI_PE_STATUS_BAD_REQUEST 400
 #define CI_PE_STATUS_NOT_FOUND 404
 #define CI_PE_STATUS_NOT_ALLOWED 405
+#define CI_PE_STATUS_UNSUPPORTED_FLOW 406
 #define CI_PE_STATUS_TOO_LARGE 413
+#define CI_PE_STATUS_UNSUPPORTED_ENCODING 415
 
 /* CI_PE_NONE if the name is not a resource we have. */
 uint8_t ci_pe_lookup(const char *name, uint16_t len);
@@ -59,6 +62,7 @@ uint16_t ci_pe_body_len(uint8_t res, const struct settings *s, const char *piid)
  * CI_PE_STATUS_BAD_REQUEST; otherwise CI_PE_STATUS_OK. A resource that cannot
  * be Set gets CI_PE_STATUS_NOT_ALLOWED. */
 uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s);
+uint16_t ci_pe_apply_set_mode(uint8_t res, const char *body, uint16_t len, struct settings *s, uint8_t partial);
 
 /* Resources whose body differs between a and b (CI_PE_BIT mask). */
 uint8_t ci_pe_changed(const struct settings *a, const struct settings *b);

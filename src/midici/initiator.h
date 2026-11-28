@@ -16,7 +16,7 @@ extern "C" {
 /* Peer progress / status flags (ci_peer_info_t::flags) */
 #define CI_PEER_FLAG_DISCOVERED  0x01u  /* DiscoveryReply (0x71) received */
 #define CI_PEER_FLAG_ENDPOINT    0x02u  /* EndpointReply (0x73) PIID received */
-#define CI_PEER_FLAG_PROFILES    0x04u  /* ProfileInquiryReply (0x21) received */
+#define CI_PEER_FLAG_PROFILES    0x04u  /* Final Function Block Profile Inquiry Reply (0x21) received */
 #define CI_PEER_FLAG_PE_CAPS     0x08u  /* PE CapabilitiesReply (0x31) received */
 #define CI_PEER_FLAG_DEVICE_INFO 0x10u  /* PE Get DeviceInfo (0x35) status 200 */
 #define CI_PEER_FLAG_NAK         0x20u  /* Follow-up NAK'd, 4xx, malformed, or timed out */
@@ -28,14 +28,14 @@ typedef struct ci_peer_info {
 	uint16_t family;
 	uint16_t model;
 	uint16_t device_info_status;
+	uint16_t profiles_enabled;     /* Total across scopes when CI_PEER_FLAG_PROFILES is set */
+	uint16_t profiles_disabled;
 	uint8_t manufacturer[3];
 	uint8_t sw_rev[4];
 	uint8_t version;
 	uint8_t categories;
 	uint8_t function_block;
 	uint8_t pe_simultaneous;
-	uint8_t profiles_enabled;
-	uint8_t profiles_disabled;
 	uint8_t flags;
 	char product_instance_id[CI_PEER_PIID_BUF_BYTES];
 } ci_peer_info_t;

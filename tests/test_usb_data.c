@@ -216,6 +216,44 @@ static void test_ci_nak_address_and_sysex_limit(void)
 	CHECK_EQ(reply.len, 0);
 }
 
+static void test_ci_unsupported_profile_request_nak_details(void)
+{
+	struct ump_sysex7_rx reply;
+	uint8_t request[] = {0xF0, 0x7E, 0x00, 0x0D, 0x22, 0x02, 1, 2, 3, 4,
+		0, 0, 0, 0, 0x7E, 1, 2, 3, 4, 1, 0, 0xF7};
+	const uint8_t types[] = {0x22, 0x23, 0x28};
+	const uint8_t scopes[] = {0x00, 0x7E, 0x7F};
+	enter_alt1();
+	ci_discover(&reply);
+	memcpy(request + 10, reply.buf + 6, 4);
+	for (unsigned i = 0; i < sizeof(types); i++) {
+		request[2] = scopes[i];
+		request[4] = types[i];
+		request[19] = (i == 0) ? 1 : 0;
+		if (types[i] == 0x28)
+			request[20] = 0xF7; /* Profile Details Inquiry has one target byte */
+		host_out_sysex(0, request, sizeof(request) - (types[i] == 0x28));
+		host_in_ci(&reply, 0);
+		CHECK_EQ(reply.len, 25);
+		CHECK_EQ(reply.buf[2], scopes[i]);
+		CHECK_EQ(reply.buf[4], 0x7F);
+		CHECK_EQ(reply.buf[5], 2);
+		CHECK_MEM(reply.buf + 6, request + 10, 4);
+		CHECK_MEM(reply.buf + 10, request + 6, 4);
+		CHECK_EQ(reply.buf[14], types[i]);
+		CHECK_EQ(reply.buf[15], 0x01);
+		CHECK_MEM(reply.buf + 17, request + 14, 5);
+	}
+
+	/* Format 2 Set Profile On requires the two channel-count bytes. */
+	request[4] = 0x22;
+	request[19] = 0xF7;
+	host_out_sysex(0, request, 20);
+	host_in_ci(&reply, 0);
+	CHECK_EQ(reply.buf[15], 0x41);
+	CHECK_MEM(reply.buf + 17, request + 14, 5);
+}
+
 static void test_ci_muid_replacement_and_collision(void)
 {
 	struct ump_sysex7_rx reply;
@@ -708,6 +746,51 @@ static void test_ci_pe_surface_settings(void)
 	CHECK(strstr(body, "\"Standalone Right\",\"channel\":5") != 0);
 }
 
+static void test_ci_pe_v12_flow_encoding_partial_and_busy(void)
+{
+	static char hdr[64], body[4096], want[4096];
+
+	pe_setup(128, 1);
+	pe_send(0x34, 1, "{\"resource\":\"ResourceList\",\"flowControl\":true}", "");
+	host_in_pe();
+	pe_reply(0x35, 1, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":406}") == 0);
+	pe_send(0x34, 2, "{\"resource\":\"DeviceInfo\",\"mutualEncoding\":\"Mcoded7\"}", "");
+	host_in_pe();
+	pe_reply(0x35, 2, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":415}") == 0);
+
+	pe_send(0x36, 3, "{\"resource\":\"X-ScaleSettings\",\"setPartial\":true}", "{\"/root\":8}");
+	host_in_pe();
+	pe_reply(0x37, 3, PE_ME, 128, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":200}") == 0);
+	CHECK_EQ(fake_s.root, 8);
+
+	/* Starting a competing Get must not replace the active multi-chunk reply. */
+	pe_send(0x34, 4, "{\"resource\":\"X-ScaleList\"}", "");
+	pe_send_from(PE_OTHER, 0x34, 5, "{\"resource\":\"DeviceInfo\"}", 1, 1, "", 0);
+	host_in_pe();
+	uint16_t busy = 0, chunks = 0, len = 0;
+	for (uint16_t i = 0; i < pe_count; i++) {
+		struct pe_view v;
+		pe_view(&pe_rx[i], &v);
+		if (v.req == 5) {
+			CHECK_MEM(v.hdr, "{\"status\":343}", 14);
+			busy++;
+		} else {
+			CHECK_EQ(v.req, 4);
+			CHECK_EQ(v.num, ++chunks);
+			CHECK(len + v.data_len <= sizeof body);
+			memcpy(body + len, v.data, v.data_len);
+			len += v.data_len;
+		}
+	}
+	CHECK_EQ(busy, 1);
+	CHECK_EQ(len, pe_render(CI_PE_SCALE_LIST, &fake_s, "", want, sizeof want));
+	CHECK_MEM(body, want, len);
+	midici_pe_bind(0, 0);
+}
+
 static void test_ci_pe_subscribe(void)
 {
 	static char hdr[64], body[8];
@@ -749,11 +832,26 @@ static void test_ci_pe_subscribe(void)
 	fake_s.channel = 4;
 	pe_expect_notify(0, 0, 0);
 
-	/* the latest subscriber wins */
-	pe_subscribe(PE_ME, 5, "X-ScaleSettings");
-	id = pe_subscribe(PE_OTHER, 6, "X-ScaleSettings");
+	/* A competing start gets 343 and the original subscription stays active. */
+	id = pe_subscribe(PE_OTHER, 5, "X-ScaleSettings");
+	pe_send(0x38, 6, "{\"command\":\"start\",\"resource\":\"X-ScaleSettings\"}", "");
+	host_in_pe();
+	pe_reply(0x39, 6, PE_ME, 320, hdr, body, sizeof body);
+	CHECK(strcmp(hdr, "{\"status\":343}") == 0);
 	fake_s.octave = 6;
 	pe_expect_notify(PE_OTHER, id, CI_PE_SCALE_SETTINGS);
+
+	/* A Set also updates a derived resource subscribed to by the same peer. */
+	id = pe_subscribe(PE_ME, 11, "ChannelList");
+	CHECK(id != 0);
+	pe_send(0x36, 12, "{\"resource\":\"X-PlayOptions\"}", "{\"channel\":7}");
+	host_in_pe();
+	CHECK_EQ(pe_count, 2);
+	CHECK_EQ(pe_rx[0].buf[4], 0x37);
+	CHECK_EQ(pe_rx[1].buf[4], 0x38);
+	CHECK_MEM(pe_rx[1].buf + 10, PE_ME, 4);
+	fake_s.channel = 7;
+	pe_expect_notify(PE_ME, id, CI_PE_CHANNEL_LIST);
 
 	/* a read-only resource, unknown resource, or unknown command */
 	pe_send(0x38, 7, "{\"command\":\"start\",\"resource\":\"DeviceInfo\"}", "");
@@ -1971,11 +2069,13 @@ void test_usb_data_all(void)
 {
 	RUN(test_ci_discovery_endpoint_and_version);
 	RUN(test_ci_nak_address_and_sysex_limit);
+	RUN(test_ci_unsupported_profile_request_nak_details);
 	RUN(test_ci_muid_replacement_and_collision);
 	RUN(test_ci_reply_retries_and_is_discarded_on_alt_change);
 	RUN(test_ci_pe_capabilities_and_get);
 	RUN(test_ci_pe_small_initiator_and_terminate);
 	RUN(test_ci_pe_set);
+	RUN(test_ci_pe_v12_flow_encoding_partial_and_busy);
 	RUN(test_ci_pe_subscribe);
 	RUN(test_ci_pe_one_chunk_per_pass_and_backpressure);
 	RUN(test_ci_pe_multi_muid_max_sysex_cache);

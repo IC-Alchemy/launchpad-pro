@@ -1266,7 +1266,7 @@ E2E_TEST(2, "T2-F11-03", "Large maxSysEx (4096 and 0x0FFFFFFF) clamps to CI_PE_M
 	E2E_CHECK(body == render_expected_pe(CI_PE_TUNING_LIST, ui_settings(), "TEST0001"));
 }
 
-E2E_TEST(2, "T2-F11-04", "New GET arriving mid-chunked-GET replaces in-flight reply cleanly (simultaneous=1)") {
+E2E_TEST(2, "T2-F11-04", "Competing GET receives 343 while the original reply completes (simultaneous=1)") {
 	e2e::FirmwareNode fw;
 	fw.boot(true, 1);
 	const uint32_t fwMuid = discover_fw_muid(fw, 0x01020304u, 128u);
@@ -1288,11 +1288,24 @@ E2E_TEST(2, "T2-F11-04", "New GET arriving mid-chunked-GET replaces in-flight re
 	send_ci(fw, 0, make_pe_bytes(ms::MessageType::PropertyGetDataInquiry, 0x01020304u, fwMuid,
 	                             2u, R"({"resource":"DeviceInfo"})"));
 	const DrainedOutputs rest = drain_outputs(fw, 0);
-	E2E_CHECK_EQ(rest.ciMsgs.size(), 3u);
+	std::vector<std::vector<uint8_t>> original = first.ciMsgs;
+	std::vector<std::vector<uint8_t>> rejected;
+	for (const auto& msg : rest.ciMsgs) {
+		ms::ParsedMessage parsed{};
+		if (ms::Parse(msg.data(), msg.size(), parsed) == ms::ParseStatus::Ok &&
+		    parsed.PropertyExchange.RequestId == 2u)
+			rejected.push_back(msg);
+		else
+			original.push_back(msg);
+	}
 	std::string hdr, body;
-	E2E_CHECK(reassemble_pe_reply(rest.ciMsgs, ms::MessageType::PropertyGetDataReply, 2u, fwMuid,
+	E2E_CHECK(reassemble_pe_reply(rejected, ms::MessageType::PropertyGetDataReply, 2u, fwMuid,
 	                              0x01020304u, 128u, hdr, body));
-	E2E_CHECK(body == render_expected_pe(CI_PE_DEVICE_INFO, ui_settings(), "TEST0001"));
+	E2E_CHECK(hdr == R"({"status":343})");
+	E2E_CHECK(body.empty());
+	E2E_CHECK(reassemble_pe_reply(original, ms::MessageType::PropertyGetDataReply, 1u, fwMuid,
+	                              0x01020304u, 128u, hdr, body));
+	E2E_CHECK(body == render_expected_pe(CI_PE_RESOURCE_LIST, ui_settings(), "TEST0001"));
 }
 
 E2E_TEST(2, "T2-F11-05", "CiTxQueue backpressure mid-PE-chunking stalls without loss or overflow") {

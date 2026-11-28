@@ -106,9 +106,16 @@ The full pad map of the menu and every check to run on the hardware are in
 The Standalone Function Block supports MIDI-CI 1.2 over USB UMP. It answers
 Discovery and Product Instance ID inquiries, handles MUID invalidation,
 collisions, and negative acknowledgments, and supports Property Exchange
-(Common Rules for PE 1.1). Discovery advertises Property Exchange only; Profiles
-and Process Inquiry are not supported. The Windows UI calls UMP group 0
-**Group 1**.
+(Common Rules for PE 1.2, ASCII JSON). Discovery advertises Property Exchange. The Windows
+UI calls UMP group 0 **Group 1**.
+
+When a peer advertises Profile Configuration, the Launchpad sends a
+Function Block Profile Inquiry. It counts enabled and disabled entries from
+channel, Group, and Function Block replies and publishes the snapshot after the
+final `0x7F` reply, even when both lists in that reply are empty. This follows
+section 2.4 of the [Common Rules for MIDI-CI Profiles v1.1](https://midi.org/common-rules-for-midi-ci-profiles).
+The Launchpad implements no local Profile. It returns a MIDI-CI NAK for incoming
+Profile requests, including the requested Profile ID where applicable.
 
 Property Exchange resources, one request at a time, messages up to 320 bytes:
 
@@ -116,21 +123,26 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 |---|---|---|---|---|
 | `ResourceList` | yes | | | The resources below, with JSON schemas for the two settings resources |
 | `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
-| `ChannelList` | yes | | | The Standalone Port and its MIDI channel. X lists "Standalone Lower" and "Standalone Upper". Y lists "Standalone Left" and "Standalone Right". |
-| `X-ScaleSettings` | yes | full | yes | `root` (0 to 11), `scale` (0 to 55), an index into the current `X-ScaleList`, `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
-| `X-PlayOptions` | yes | full | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
-| `X-ScaleList` | yes | | | The 61 scale names, in `scale` order |
+| `ChannelList` | yes | | yes | One entry per active MIDI channel. With two distinct channels, X lists "Standalone Lower" and "Standalone Upper", and Y lists "Standalone Left" and "Standalone Right". |
+| `X-ScaleSettings` | yes | full and partial | yes | `root` (0 to 11), `scale` (0 to 60), `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
+| `X-PlayOptions` | yes | full and partial | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
+| `X-ScaleList` | yes | | | 61 objects with a `name` field, in `scale` order |
 | `X-TuningList` | yes | | | The 29 tunings: `id`, `name`, `degrees`, and `scales` (the scales it offers, in menu order; left out for twelve-note tunings, which offer scales 0 to 30) |
-| `X-SurfaceSettings` | yes | full | yes | `palette` and `upperPalette` (`ocean`, `citrus`, `glacier`, `contrast`), `splitMode` (`off`, `x`, `y`), `upperChannel` (1 to 16). The legacy `split` boolean is also accepted. The primary half's channel is `channel` in `X-PlayOptions` |
+| `X-SurfaceSettings` | yes | full and partial | yes | `palette` and `upperPalette` (`ocean`, `citrus`, `glacier`, `contrast`), `splitMode` (`off`, `x`, `y`), `upperChannel` (1 to 16). The legacy `split` boolean is also accepted. The primary half's channel is `channel` in `X-PlayOptions` |
 
-A Set changes only the fields it gives and is applied like a change in the
-Setup menu (saved to flash 2 s later). One bad field rejects the whole Set with
+A partial Set uses `"setPartial":true` and JSON Pointer keys such as `"/root"`.
+Legacy Settings editors can still send a subset of plain keys. Both operations
+use the same validation and flash save schedule as the Setup menu. One bad field rejects the whole Set with
 status 400, and so does a `scale` the tuning doesn't offer. A Set that changes
 `tuning` without a `scale` keeps the scale if the new tuning offers it, and
-otherwise moves to the tuning's default scale. Each settings resource has one subscriber (the latest wins), which
+otherwise moves to the tuning's default scale. Each settings resource has one subscriber, which
 gets a full notify when the settings change from the menu or from another
 initiator. Subscriptions end on USB reset, an alternate-setting change, or MUID
-invalidation.
+invalidation. Competing requests and subscriptions can return status 343.
+Flow control and encodings other than ASCII JSON receive 406 and 415.
+
+The firmware exposes USB UMP, USB MIDI 1.0, and DIN MIDI. A host bridge is
+required to connect the Launchpad over Network MIDI 2.0 UDP.
 
 On Windows, select the Launchpad endpoint in MIDI2Sound using Windows MIDI
 Services, open **MIDI-CI**, and click **DISCOVER**. Expect one reply on Group 1

@@ -24,8 +24,8 @@ static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
  * The schemas let a generic editor (MIDI 2.0 Workbench) show real controls. */
 static const char RESOURCE_LIST[] =
 	"[{\"resource\":\"DeviceInfo\"},"
-	"{\"resource\":\"ChannelList\"},"
-	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"{\"resource\":\"ChannelList\",\"canSubscribe\":true},"
+	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Scale\",\"type\":\"object\",\"properties\":{"
 	"\"root\":{\"title\":\"Root (0 = C)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":11},"
 	"\"scale\":{\"title\":\"Scale (X-ScaleList index; one the tuning offers)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":55},"
@@ -36,7 +36,7 @@ static const char RESOURCE_LIST[] =
 	"\"tuning\":{\"title\":\"Tuning (X-TuningList id)\",\"type\":\"integer\",\"enum\":[0,1,2,3,4,5,6,7,8,9,10,11,"
 	"32,33,34,35,36,37,64,65,66,67,96,97,98,128,129,130,131]},"
 	"\"a4Tenths\":{\"title\":\"A4 (tenths of a Hz)\",\"type\":\"integer\",\"minimum\":4150,\"maximum\":4660}}}},"
-	"{\"resource\":\"X-PlayOptions\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"{\"resource\":\"X-PlayOptions\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Play options\",\"type\":\"object\",\"properties\":{"
 	"\"velocityMode\":{\"title\":\"Velocity mode\",\"type\":\"string\","
 	"\"enum\":[\"peakWindow\",\"zeroLatency\",\"twoStage\",\"fixed\"]},"
@@ -49,12 +49,12 @@ static const char RESOURCE_LIST[] =
 	"\"dinMirror\":{\"title\":\"Mirror pads to DIN\",\"type\":\"boolean\"},"
 	"\"channel\":{\"title\":\"MIDI channel\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}},"
 	"{\"resource\":\"X-ScaleList\",\"schema\":{\"title\":\"Scale names\",\"type\":\"array\","
-	"\"items\":{\"type\":\"string\"}}},"
+	"\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}}},"
 	"{\"resource\":\"X-TuningList\",\"schema\":{\"title\":\"Tunings\",\"type\":\"array\","
 	"\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},"
 	"\"name\":{\"type\":\"string\"},\"degrees\":{\"type\":\"integer\"},"
 	"\"scales\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}}}}},"
-	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"full\",\"canSubscribe\":true,"
+	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Surface\",\"type\":\"object\",\"properties\":{"
 	"\"palette\":{\"title\":\"Palette (whole grid, lower or left)\",\"type\":\"string\",\"enum\":["
 	"\"ocean\",\"citrus\",\"glacier\",\"contrast\"]},"
@@ -103,7 +103,7 @@ uint8_t ci_pe_can_set(uint8_t res)
 
 uint8_t ci_pe_can_subscribe(uint8_t res)
 {
-	return ci_pe_can_set(res);
+	return res == CI_PE_CHANNEL_LIST || ci_pe_can_set(res);
 }
 
 /* ---- rendering ---- */
@@ -245,6 +245,11 @@ static void tuning_list(struct ci_json_out *o)
 	ci_json_raw(o, "]");
 }
 
+static uint8_t channel_list_split(const struct settings *s)
+{
+	return s->channel == s->upper_channel ? SPLIT_OFF : s->split_mode;
+}
+
 void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struct ci_json_out *o)
 {
 	uint8_t i;
@@ -256,18 +261,20 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 	case CI_PE_DEVICE_INFO:
 		device_info(o, piid);
 		break;
-	case CI_PE_CHANNEL_LIST:
+	case CI_PE_CHANNEL_LIST: {
+		const uint8_t split = channel_list_split(s);
 		ci_json_raw(o, "[{");
-		member_str(o, "title", s->split_mode == SPLIT_Y ? "Standalone Left" :
-		           s->split_mode == SPLIT_X ? "Standalone Lower" : "Standalone Port", 0);
+		member_str(o, "title", split == SPLIT_OFF ? "Standalone Port" :
+		           split == SPLIT_Y ? "Standalone Left" : "Standalone Lower", 0);
 		member_int(o, "channel", s->channel + 1, 1);
-		if (s->split_mode != SPLIT_OFF) {
+		if (split != SPLIT_OFF) {
 			ci_json_raw(o, "},{");
-			member_str(o, "title", s->split_mode == SPLIT_Y ? "Standalone Right" : "Standalone Upper", 0);
+			member_str(o, "title", split == SPLIT_Y ? "Standalone Right" : "Standalone Upper", 0);
 			member_int(o, "channel", s->upper_channel + 1, 1);
 		}
 		ci_json_raw(o, "}]");
 		break;
+	}
 	case CI_PE_SCALE_SETTINGS:
 	case CI_PE_PLAY_OPTIONS:
 	case CI_PE_SURFACE_SETTINGS:
@@ -278,7 +285,9 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 		for (i = 0; i < SCALE_COUNT; i++) {
 			if (i)
 				ci_json_raw(o, ",");
+			ci_json_raw(o, "{\"name\":");
 			ci_json_str(o, SCALES[i].name);
+			ci_json_raw(o, "}");
 		}
 		ci_json_raw(o, "]");
 		break;
@@ -359,7 +368,7 @@ static uint8_t set_palette(const struct ci_json_member *m, uint8_t *field)
 	return 0;
 }
 
-uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s)
+uint16_t ci_pe_apply_set_mode(uint8_t res, const char *body, uint16_t len, struct settings *s, uint8_t partial)
 {
 	struct settings t = *s;
 	struct ci_json_it it;
@@ -373,7 +382,15 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 		return res < CI_PE_RESOURCE_COUNT ? CI_PE_STATUS_NOT_ALLOWED : CI_PE_STATUS_NOT_FOUND;
 	ci_json_it_init(&it, body, len);
 	while ((r = ci_json_next(&it, &m)) == 1) {
-		uint8_t ok = 1;
+		uint8_t ok = !partial; /* unknown legacy full-Set members are ignored */
+		if (partial) {
+			/* These resources are flat and only have scalar writable properties. */
+			if (m.key_len < 2 || m.key[0] != '/' ||
+			    m.type == CI_JSON_NULL || m.type == CI_JSON_OTHER)
+				return CI_PE_STATUS_BAD_REQUEST;
+			m.key++;
+			m.key_len--;
+		}
 		if (res == CI_PE_SCALE_SETTINGS) {
 			if (ci_json_key_is(&m, "root"))
 				ok = set_int(&m, 0, 11, 0, &t.root);
@@ -438,6 +455,11 @@ uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct set
 	return CI_PE_STATUS_OK;
 }
 
+uint16_t ci_pe_apply_set(uint8_t res, const char *body, uint16_t len, struct settings *s)
+{
+	return ci_pe_apply_set_mode(res, body, len, s, 0);
+}
+
 uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
 {
 	uint8_t bits = 0;
@@ -454,8 +476,9 @@ uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
 	if (a->palette != b->palette || a->split_mode != b->split_mode ||
 	    a->upper_palette != b->upper_palette || a->upper_channel != b->upper_channel)
 		bits |= CI_PE_BIT(CI_PE_SURFACE_SETTINGS);
-	if (a->channel != b->channel || a->split_mode != b->split_mode ||
-	    (a->split_mode != SPLIT_OFF && a->upper_channel != b->upper_channel))
+	const uint8_t split = channel_list_split(a);
+	if (a->channel != b->channel || split != channel_list_split(b) ||
+	    (split != SPLIT_OFF && a->upper_channel != b->upper_channel))
 		bits |= CI_PE_BIT(CI_PE_CHANNEL_LIST);
 	return bits;
 }
