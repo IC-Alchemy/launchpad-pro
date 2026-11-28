@@ -24,7 +24,7 @@ static const char *const NAMES[CI_PE_RESOURCE_COUNT] = {
  * The schemas let a generic editor (MIDI 2.0 Workbench) show real controls. */
 static const char RESOURCE_LIST[] =
 	"[{\"resource\":\"DeviceInfo\"},"
-	"{\"resource\":\"ChannelList\"},"
+	"{\"resource\":\"ChannelList\",\"canSubscribe\":true},"
 	"{\"resource\":\"X-ScaleSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Scale\",\"type\":\"object\",\"properties\":{"
 	"\"root\":{\"title\":\"Root (0 = C)\",\"type\":\"integer\",\"minimum\":0,\"maximum\":11},"
@@ -103,7 +103,7 @@ uint8_t ci_pe_can_set(uint8_t res)
 
 uint8_t ci_pe_can_subscribe(uint8_t res)
 {
-	return ci_pe_can_set(res);
+	return res == CI_PE_CHANNEL_LIST || ci_pe_can_set(res);
 }
 
 /* ---- rendering ---- */
@@ -245,6 +245,11 @@ static void tuning_list(struct ci_json_out *o)
 	ci_json_raw(o, "]");
 }
 
+static uint8_t channel_list_split(const struct settings *s)
+{
+	return s->channel == s->upper_channel ? SPLIT_OFF : s->split_mode;
+}
+
 void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struct ci_json_out *o)
 {
 	uint8_t i;
@@ -256,18 +261,20 @@ void ci_pe_render(uint8_t res, const struct settings *s, const char *piid, struc
 	case CI_PE_DEVICE_INFO:
 		device_info(o, piid);
 		break;
-	case CI_PE_CHANNEL_LIST:
+	case CI_PE_CHANNEL_LIST: {
+		const uint8_t split = channel_list_split(s);
 		ci_json_raw(o, "[{");
-		member_str(o, "title", s->split_mode == SPLIT_Y ? "Standalone Left" :
-		           s->split_mode == SPLIT_X ? "Standalone Lower" : "Standalone Port", 0);
+		member_str(o, "title", split == SPLIT_OFF ? "Standalone Port" :
+		           split == SPLIT_Y ? "Standalone Left" : "Standalone Lower", 0);
 		member_int(o, "channel", s->channel + 1, 1);
-		if (s->split_mode != SPLIT_OFF) {
+		if (split != SPLIT_OFF) {
 			ci_json_raw(o, "},{");
-			member_str(o, "title", s->split_mode == SPLIT_Y ? "Standalone Right" : "Standalone Upper", 0);
+			member_str(o, "title", split == SPLIT_Y ? "Standalone Right" : "Standalone Upper", 0);
 			member_int(o, "channel", s->upper_channel + 1, 1);
 		}
 		ci_json_raw(o, "}]");
 		break;
+	}
 	case CI_PE_SCALE_SETTINGS:
 	case CI_PE_PLAY_OPTIONS:
 	case CI_PE_SURFACE_SETTINGS:
@@ -469,8 +476,9 @@ uint8_t ci_pe_changed(const struct settings *a, const struct settings *b)
 	if (a->palette != b->palette || a->split_mode != b->split_mode ||
 	    a->upper_palette != b->upper_palette || a->upper_channel != b->upper_channel)
 		bits |= CI_PE_BIT(CI_PE_SURFACE_SETTINGS);
-	if (a->channel != b->channel || a->split_mode != b->split_mode ||
-	    (a->split_mode != SPLIT_OFF && a->upper_channel != b->upper_channel))
+	const uint8_t split = channel_list_split(a);
+	if (a->channel != b->channel || split != channel_list_split(b) ||
+	    (split != SPLIT_OFF && a->upper_channel != b->upper_channel))
 		bits |= CI_PE_BIT(CI_PE_CHANNEL_LIST);
 	return bits;
 }

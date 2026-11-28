@@ -123,7 +123,7 @@ Property Exchange resources, one request at a time, messages up to 320 bytes:
 |---|---|---|---|---|
 | `ResourceList` | yes | | | The resources below, with JSON schemas for the two settings resources |
 | `DeviceInfo` | yes | | | Novation IDs, "Launchpad Pro MIDI 2.0", version 0.1.0.0, serial number = Product Instance ID |
-| `ChannelList` | yes | | | The Standalone Port and its MIDI channel. X lists "Standalone Lower" and "Standalone Upper". Y lists "Standalone Left" and "Standalone Right". |
+| `ChannelList` | yes | | yes | One entry per active MIDI channel. With two distinct channels, X lists "Standalone Lower" and "Standalone Upper", and Y lists "Standalone Left" and "Standalone Right". |
 | `X-ScaleSettings` | yes | full and partial | yes | `root` (0 to 11), `scale` (0 to 60), `octave` (0 to 7), `layout`, `absoluteRoot`, `tuning` (a tuning id), `a4Tenths` (A4 in tenths of a hertz, 4150 to 4660) |
 | `X-PlayOptions` | yes | full and partial | yes | `velocityMode`, `velocityCurve`, `pressureMode`, `pressureThreshold` (`low`, `med`, `high`, `instant`), `pressureSmoothing`, `dinMirror`, `channel` (1 to 16) |
 | `X-ScaleList` | yes | | | 61 objects with a `name` field, in `scale` order |

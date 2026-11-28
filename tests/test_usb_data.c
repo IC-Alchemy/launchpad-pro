@@ -841,6 +841,18 @@ static void test_ci_pe_subscribe(void)
 	fake_s.octave = 6;
 	pe_expect_notify(PE_OTHER, id, CI_PE_SCALE_SETTINGS);
 
+	/* A Set also updates a derived resource subscribed to by the same peer. */
+	id = pe_subscribe(PE_ME, 11, "ChannelList");
+	CHECK(id != 0);
+	pe_send(0x36, 12, "{\"resource\":\"X-PlayOptions\"}", "{\"channel\":7}");
+	host_in_pe();
+	CHECK_EQ(pe_count, 2);
+	CHECK_EQ(pe_rx[0].buf[4], 0x37);
+	CHECK_EQ(pe_rx[1].buf[4], 0x38);
+	CHECK_MEM(pe_rx[1].buf + 10, PE_ME, 4);
+	fake_s.channel = 7;
+	pe_expect_notify(PE_ME, id, CI_PE_CHANNEL_LIST);
+
 	/* a read-only resource, unknown resource, or unknown command */
 	pe_send(0x38, 7, "{\"command\":\"start\",\"resource\":\"DeviceInfo\"}", "");
 	host_in_pe();

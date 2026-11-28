@@ -137,6 +137,7 @@ static void test_pe_lookup(void)
 	CHECK(ci_pe_can_set(CI_PE_SCALE_SETTINGS) && ci_pe_can_set(CI_PE_PLAY_OPTIONS));
 	CHECK(!ci_pe_can_set(CI_PE_DEVICE_INFO) && !ci_pe_can_set(CI_PE_RESOURCE_LIST));
 	CHECK(ci_pe_can_subscribe(CI_PE_PLAY_OPTIONS) && !ci_pe_can_subscribe(CI_PE_SCALE_LIST));
+	CHECK(ci_pe_can_subscribe(CI_PE_CHANNEL_LIST) && !ci_pe_can_set(CI_PE_CHANNEL_LIST));
 }
 
 static void test_pe_fixed_resources(void)
@@ -151,6 +152,7 @@ static void test_pe_fixed_resources(void)
 	CHECK_EQ(n, ci_pe_body_len(CI_PE_RESOURCE_LIST, &s, ""));
 	CHECK(buf[0] == '[' && buf[n - 1] == ']');
 	CHECK(strstr(buf, "\"resource\":\"DeviceInfo\"") != 0);
+	CHECK(strstr(buf, "\"resource\":\"ChannelList\",\"canSubscribe\":true") != 0);
 	CHECK(strstr(buf, "\"resource\":\"X-ScaleList\"") != 0);
 	CHECK(strstr(buf, "\"resource\":\"ResourceList\"") == 0);
 
@@ -405,6 +407,9 @@ static void test_pe_surface_settings(void)
 	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
 	CHECK(strcmp(buf, "[{\"title\":\"Standalone Left\",\"channel\":3},"
 	                  "{\"title\":\"Standalone Right\",\"channel\":7}]") == 0);
+	s.upper_channel = s.channel;
+	render(CI_PE_CHANNEL_LIST, &s, "", buf, sizeof buf);
+	CHECK(strcmp(buf, "[{\"title\":\"Standalone Port\",\"channel\":3}]") == 0);
 
 	/* the schema lists every palette by its name */
 	{

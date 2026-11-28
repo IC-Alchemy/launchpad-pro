@@ -17,7 +17,8 @@ using T = ms::MessageType;
 
 constexpr uint8_t kGroup = 0;	/* PE is answered on the Standalone Function Block only */
 constexpr uint8_t kHeaderMax = 48;
-constexpr uint8_t kSubscribable[] = {CI_PE_SCALE_SETTINGS, CI_PE_PLAY_OPTIONS, CI_PE_SURFACE_SETTINGS};
+constexpr uint8_t kSubscribable[] = {CI_PE_SCALE_SETTINGS, CI_PE_PLAY_OPTIONS,
+                                     CI_PE_SURFACE_SETTINGS, CI_PE_CHANNEL_LIST};
 constexpr int kSubCount = sizeof kSubscribable / sizeof kSubscribable[0];
 /* PE Notify status that ends a transaction (Common Rules for PE, 144: terminate). */
 constexpr int32_t kStatusTerminate = 144;
@@ -358,12 +359,12 @@ void on_get(const ms::ParsedMessage &m, const uint8_t *payload, const char *piid
 	      settings_get ? settings_get() : nullptr, piid);
 }
 
-/* After a Set or a menu change: queue full notifies for subscribers of the
- * changed resources, except the initiator that made the change. */
-void mark_changed(uint8_t bits, uint32_t except)
+/* The setter already knows the resource it wrote. Derived resources still get updates. */
+void mark_changed(uint8_t bits, uint32_t sender, uint8_t written_resource)
 {
 	for (int i = 0; i < kSubCount; i++)
-		if (subs[i].active && (bits & CI_PE_BIT(kSubscribable[i])) && subs[i].muid != except)
+		if (subs[i].active && (bits & CI_PE_BIT(kSubscribable[i])) &&
+		    (subs[i].muid != sender || kSubscribable[i] != written_resource))
 			notify_pending |= CI_PE_BIT(kSubscribable[i]);
 }
 
@@ -380,7 +381,7 @@ void finish_set(const ms::ParsedMessage &m)
 			const struct settings before = *settings_get();
 			settings_apply(&next);
 			const struct settings &after = *settings_get();
-			mark_changed(ci_pe_changed(&before, &after), m.SourceMuid);
+			mark_changed(ci_pe_changed(&before, &after), m.SourceMuid, set_rx.resource);
 			last_seen = after;
 			have_last_seen = true;
 		}
@@ -632,7 +633,7 @@ void poll(uint32_t my_muid, const char *piid)
 		if (have_last_seen) {
 			const uint8_t bits = ci_pe_changed(&last_seen, &now);
 			if (bits)
-				mark_changed(bits, ms::MuidBroadcast);
+				mark_changed(bits, ms::MuidBroadcast, CI_PE_NONE);
 		}
 		last_seen = now;
 		have_last_seen = true;
