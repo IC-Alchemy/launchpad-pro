@@ -385,8 +385,6 @@ static void test_pe_surface_settings(void)
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"splitMode\":\"diagonal\"}", &s), CI_PE_STATUS_BAD_REQUEST);
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"palette\":\"ember\"}", &s), CI_PE_STATUS_BAD_REQUEST);
 	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"palette\":\"forest\"}", &s), CI_PE_STATUS_BAD_REQUEST);
-	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"upperPalette\":\"rose\"}", &s), CI_PE_STATUS_BAD_REQUEST);
-	CHECK_EQ(apply(CI_PE_SURFACE_SETTINGS, "{\"upperPalette\":\"amethyst\"}", &s), CI_PE_STATUS_BAD_REQUEST);
 	CHECK(same(&s, &before));
 	/* the other resources ignore the surface fields */
 	CHECK_EQ(apply(CI_PE_PLAY_OPTIONS, "{\"palette\":\"ember\"}", &s), CI_PE_STATUS_OK);

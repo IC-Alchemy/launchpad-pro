@@ -65,8 +65,8 @@ static void test_play_page_colours_default(void)
 	CHECK(led_is(11, 0, 19, 63));  /* C: root */
 	/* the default palette, Ocean */
 	CHECK(led_is(12, 0, 3, 10));   /* D: scale */
-	CHECK(led_is(13, 5, 8, 15));   /* E: 3rd */
-	CHECK(led_is(15, 0, 44, 58));  /* G: 5th */
+	CHECK(led_is(13, 1, 8, 24));   /* E: 3rd */
+	CHECK(led_is(15, 0, 37, 63));  /* G: 5th */
 	CHECK(led_is(98, 0, 0, 0));    /* the Surface page button: menu only */
 	CHECK(led_is(91, 6, 6, 6));
 	CHECK(led_is(92, 6, 6, 6));
@@ -673,12 +673,12 @@ static void test_apply_settings_change(void)
 
 /* Ocean and Contrast colours, from instrument/palette.c */
 #define OCEAN_ROOT   0, 19, 63
-#define OCEAN_THIRD  5, 8, 15
-#define OCEAN_FIFTH  0, 44, 58
+#define OCEAN_THIRD  1, 8, 24
+#define OCEAN_FIFTH  0, 37, 63
 #define OCEAN_SCALE  0, 3, 10
-#define CONTRAST_ROOT   4, 17, 63
-#define CONTRAST_FIFTH  0, 58, 63
-#define CONTRAST_SCALE  1, 3, 11
+#define CONTRAST_ROOT   63, 10, 0
+#define CONTRAST_FIFTH  63, 28, 0
+#define CONTRAST_SCALE  13, 2, 0
 
 static void split_on(uint8_t upper_channel, uint32_t now)
 {
@@ -822,9 +822,11 @@ static void test_surface_page(void)
 	/* lower palette on row 1, upper on row 8: the chosen one in its root
 	 * colour, the others at an eighth */
 	CHECK(led_is(11, OCEAN_ROOT));
-	CHECK(led_is(12, 2, 2, 8));       /* Citrus, dim */
+	CHECK(led_is(12, 4, 4, 0));       /* Citrus, dim */
 	CHECK(led_is(84, CONTRAST_ROOT));
-	CHECK(led_is(85, 0, 0, 0));
+	CHECK(led_is(85, 8, 0, 3));       /* Rose, dim */
+	CHECK(led_is(86, 3, 1, 8));       /* Amethyst, dim */
+	CHECK(led_is(87, 0, 0, 0));
 	CHECK(led_is(81, 0, 3, 8));       /* Ocean, not chosen */
 	/* previews at the seam: row 5 upper, row 4 lower */
 	CHECK(led_is(41, OCEAN_ROOT));
@@ -871,6 +873,45 @@ static void test_surface_page(void)
 	CHECK_EQ(ui_settings()->split_mode, SPLIT_OFF);
 }
 
+static void test_split_palette_pair_cycle(void)
+{
+	static const uint8_t primary[] = {PALETTE_GLACIER, PALETTE_CITRUS, PALETTE_OCEAN};
+	static const uint8_t second[] = {PALETTE_ROSE, PALETTE_AMETHYST, PALETTE_CONTRAST};
+	uint8_t p;
+
+	setup();
+	zero_latency(T0);
+	tap(80, T0 + 10);
+	CHECK(led_is(10, 6, 6, 6));
+	ui_pad(11, 100, T0 + 20);
+	for (p = 0; p < sizeof primary; p++) {
+		tap(10, T0 + 30 + p);
+		CHECK_EQ(ui_settings()->palette, primary[p]);
+		CHECK_EQ(ui_settings()->upper_palette, second[p]);
+		CHECK_EQ(ui_settings()->split_mode, SPLIT_X);
+		CHECK_EQ(ui_settings()->channel, 0);
+		CHECK_EQ(ui_settings()->upper_channel, 1);
+		CHECK(led_is(11, 63, 63, 63));
+		CHECK_MEM(io_leds[15], palette_rgb(primary[p], ROLE_FIFTH), 3);
+		CHECK_MEM(io_leds[53], palette_rgb(second[p], ROLE_ROOT), 3);
+	}
+	CHECK_EQ(io_n, 1);
+	ui_pad(11, 0, T0 + 40);
+	CHECK_EQ(io_n, 2);
+
+	setup_tap(T0 + 50);
+	tap(98, T0 + 110);
+	tap(70, T0 + 120);
+	tap(15, T0 + 130);
+	tap(86, T0 + 140);
+	CHECK_EQ(ui_settings()->palette, PALETTE_ROSE);
+	CHECK_EQ(ui_settings()->upper_palette, PALETTE_AMETHYST);
+	tap(10, T0 + 150); /* a custom pair starts the cycle at Ocean/Contrast */
+	CHECK_EQ(ui_settings()->split_mode, SPLIT_Y);
+	CHECK_MEM(io_leds[41], palette_rgb(PALETTE_OCEAN, ROLE_ROOT), 3);
+	CHECK_MEM(io_leds[51], palette_rgb(PALETTE_CONTRAST, ROLE_ROOT), 3);
+}
+
 static void test_left_buttons_on_play_page(void)
 {
 	static const uint8_t palette_buttons[] = {50, 40, 30, 20};
@@ -882,14 +923,14 @@ static void test_left_buttons_on_play_page(void)
 	setup();
 	zero_latency(T0);
 	CHECK(led_is(50, OCEAN_ROOT));
-	CHECK(led_is(40, 2, 2, 8));
-	CHECK(led_is(30, 0, 4, 8));
-	CHECK(led_is(20, 1, 3, 8));
+	CHECK(led_is(40, 4, 4, 0));
+	CHECK(led_is(30, 0, 4, 3));
+	CHECK(led_is(20, 8, 2, 0));
 	CHECK(led_is(10, 0, 0, 0));
 
 	/* A palette tap recolours the grid while held notes keep sounding. */
 	ui_pad(11, 100, T0 + 10);
-	for (uint8_t p = 0; p < PALETTE_COUNT; p++) {
+	for (uint8_t p = 0; p < sizeof palette_buttons; p++) {
 		tap(palette_buttons[p], T0 + 20 + p);
 		CHECK_EQ(ui_settings()->palette, p);
 		CHECK_MEM(io_leds[palette_buttons[p]], palette_rgb(p, ROLE_ROOT), 3);
@@ -1358,5 +1399,6 @@ void test_ui_all(void)
 	RUN(test_split_on_one_channel_shares_notes);
 	RUN(test_split_two_stage_uses_the_half_channel);
 	RUN(test_surface_page);
+	RUN(test_split_palette_pair_cycle);
 	RUN(test_left_buttons_on_play_page);
 }
