@@ -57,10 +57,10 @@ static const char RESOURCE_LIST[] =
 	"{\"resource\":\"X-SurfaceSettings\",\"canSet\":\"partial\",\"canSubscribe\":true,"
 	"\"schema\":{\"title\":\"Surface\",\"type\":\"object\",\"properties\":{"
 	"\"palette\":{\"title\":\"Palette (whole grid, lower or left)\",\"type\":\"string\",\"enum\":["
-	"\"ocean\",\"citrus\",\"glacier\",\"contrast\"]},"
+	"\"ocean\",\"citrus\",\"glacier\",\"contrast\",\"rose\",\"amethyst\"]},"
 	"\"splitMode\":{\"title\":\"Split mode\",\"type\":\"string\",\"enum\":[\"off\",\"x\",\"y\"]},"
 	"\"upperPalette\":{\"title\":\"Second palette (upper or right)\",\"type\":\"string\",\"enum\":["
-	"\"ocean\",\"citrus\",\"glacier\",\"contrast\"]},"
+	"\"ocean\",\"citrus\",\"glacier\",\"contrast\",\"rose\",\"amethyst\"]},"
 	"\"upperChannel\":{\"title\":\"Second MIDI channel (upper or right)\",\"type\":\"integer\",\"minimum\":1,\"maximum\":16}}}}]";
 
 /* Strings for the enum fields, indexed by the settings value. */

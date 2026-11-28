@@ -1,23 +1,19 @@
 #include "instrument/palette.h"
 
-#define OUT_GREY {2, 2, 2}
-
-/* [palette][role]: OFF, OUT, SCALE, THIRD, FIFTH, ROOT. Within each
- * palette, lightness distinguishes roles even when the blue hues look alike.
- * Keep the palette indexes and protocol names stable for saved settings. */
+/* [palette][role]: OFF, OUT, SCALE, THIRD, FIFTH, ROOT.
+ * Each row keeps to one hue family at every brightness. Keep palette
+ * indexes and protocol names stable for saved settings. */
 static const uint8_t PALETTE_RGB[PALETTE_COUNT][ROLE_COUNT][3] = {
-	/* Ocean: electric blue root, azure fifth, steel-blue third */
-	{{0, 0, 0}, OUT_GREY, {0, 3, 10}, {5, 8, 15}, {0, 44, 58}, {0, 19, 63}},
-	/* Citrus (legacy ID): indigo root, cornflower fifth, denim third */
-	{{0, 0, 0}, OUT_GREY, {2, 2, 12}, {2, 9, 16}, {12, 39, 63}, {13, 15, 63}},
-	/* Glacier: azure root, ice-blue fifth, indigo third */
-	{{0, 0, 0}, OUT_GREY, {0, 4, 8}, {9, 6, 24}, {21, 55, 63}, {0, 30, 63}},
-	/* Contrast: cobalt root, cyan-blue fifth, slate-blue third */
-	{{0, 0, 0}, OUT_GREY, {1, 3, 11}, {8, 10, 17}, {0, 58, 63}, {4, 17, 63}},
+	[PALETTE_OCEAN]    = {{0, 0, 0}, {0, 1, 4}, {0, 3, 10}, {1, 8, 24}, {0, 37, 63}, {0, 19, 63}},
+	[PALETTE_CITRUS]   = {{0, 0, 0}, {3, 3, 0}, {7, 7, 0}, {18, 17, 0}, {58, 63, 0}, {29, 28, 0}},
+	[PALETTE_GLACIER]  = {{0, 0, 0}, {0, 3, 2}, {0, 8, 6}, {0, 17, 12}, {0, 56, 55}, {0, 29, 23}},
+	[PALETTE_CONTRAST] = {{0, 0, 0}, {6, 1, 0}, {13, 2, 0}, {27, 5, 0}, {63, 28, 0}, {63, 10, 0}},
+	[PALETTE_ROSE]     = {{0, 0, 0}, {5, 0, 2}, {13, 0, 6}, {32, 0, 14}, {63, 13, 28}, {63, 0, 24}},
+	[PALETTE_AMETHYST] = {{0, 0, 0}, {2, 0, 6}, {6, 0, 17}, {15, 1, 30}, {44, 8, 63}, {24, 2, 63}},
 };
 
 static const char *const NAMES[PALETTE_COUNT] = {
-	"ocean", "citrus", "glacier", "contrast",
+	"ocean", "citrus", "glacier", "contrast", "rose", "amethyst",
 };
 
 const uint8_t *palette_rgb(uint8_t palette, enum role r)

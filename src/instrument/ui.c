@@ -30,14 +30,22 @@ enum { PAGE_SCALE, PAGE_OPTIONS, PAGE_TUNING, PAGE_SURFACE, PAGE_MIDICI };
 #define BTN_SPLIT_Y   70
 #define BTN_SPLIT_OFF 60
 #define BTN_PALETTE_FIRST 50
-#define BTN_PALETTE_LAST  (BTN_PALETTE_FIRST - (PALETTE_COUNT - 1) * 10)
+#define BTN_PALETTE_LAST  20
+#define BTN_PALETTE_PAIR  10
+
+/* Complementary hue families, in cycling order: primary, second zone. */
+static const uint8_t PALETTE_PAIRS[][2] = {
+	{PALETTE_OCEAN, PALETTE_CONTRAST},
+	{PALETTE_GLACIER, PALETTE_ROSE},
+	{PALETTE_CITRUS, PALETTE_AMETHYST},
+};
 
 /* menu item colour families, each dim (index 0) and bright (index 1) */
 enum { K_ROOT, K_SCALE, K_OCTAVE, K_LAYOUT, K_OPTION, K_VELOCITY, K_AFTERTOUCH, K_ROUTING,
        K_EQUAL, K_JUST, K_TEMPERAMENT, K_INDIAN, K_XENO, K_A4, K_KINDS,
        /* Surface page palette pads: lit in the palette's own root colour,
         * not from ITEM_RGB */
-       K_PALETTE = K_KINDS };
+       K_PALETTE = K_KINDS, K_PALETTE_PAIR };
 
 static const uint8_t ITEM_RGB[K_KINDS][2][3] = {
 	{{0, 8, 0}, {0, 63, 0}},       /* root keys: green */
@@ -301,7 +309,7 @@ static const uint8_t *palette_item(uint8_t palette, uint8_t chosen)
 	return dim;
 }
 
-/* Shared by the play and Surface pages. Palette buttons edit the primary zone. */
+/* Shared by the play and Surface pages. Individual shortcuts edit the primary zone. */
 static uint8_t surface_button(uint8_t i, struct item *it)
 {
 	if (g_menu && g_page != PAGE_SURFACE)
@@ -315,10 +323,26 @@ static uint8_t surface_button(uint8_t i, struct item *it)
 		it->field = &g_s.palette;
 		it->value = (uint8_t)((BTN_PALETTE_FIRST - i) / 10);
 		it->kind = K_PALETTE;
+	} else if (i == BTN_PALETTE_PAIR && g_s.split_mode != SPLIT_OFF) {
+		it->kind = K_PALETTE_PAIR;
 	} else {
 		return 0;
 	}
 	return 1;
+}
+
+static void cycle_palette_pair(void)
+{
+	const uint8_t count = sizeof PALETTE_PAIRS / sizeof PALETTE_PAIRS[0];
+	uint8_t p;
+
+	for (p = 0; p < count; p++)
+		if (g_s.palette == PALETTE_PAIRS[p][0] && g_s.upper_palette == PALETTE_PAIRS[p][1])
+			break;
+	/* Wrap from the last pair or start at the first pair from a custom selection. */
+	p = p + 1 < count ? (uint8_t)(p + 1) : 0;
+	g_s.palette = PALETTE_PAIRS[p][0];
+	g_s.upper_palette = PALETTE_PAIRS[p][1];
 }
 
 #define A4_NONE (-1)
@@ -380,6 +404,8 @@ static const uint8_t *colour(uint8_t i)
 	if (surface_button(i, &it)) {
 		if (it.kind == K_PALETTE)
 			return palette_item(it.value, *it.field == it.value);
+		if (it.kind == K_PALETTE_PAIR)
+			return RGB_DIM_WHITE;
 		return ITEM_RGB[it.kind][*it.field == it.value];
 	}
 	if (g_menu) {
@@ -609,13 +635,17 @@ void ui_pad(uint8_t index, uint8_t value, uint32_t now)
 	struct item it;
 
 	if (value && surface_button(index, &it)) {
-		if (*it.field != it.value) {
+		if (it.kind == K_PALETTE_PAIR) {
+			cycle_palette_pair();
+		} else {
+			if (*it.field == it.value)
+				return;
 			if (it.field == &g_s.split_mode)
 				pe_release_all();
 			*it.field = it.value;
-			draw_all();
-			settings_touch(now);
 		}
+		draw_all();
+		settings_touch(now);
 		return;
 	}
 	if (g_menu) {

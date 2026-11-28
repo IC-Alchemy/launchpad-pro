@@ -29,6 +29,31 @@ static uint8_t min3(const uint8_t *c)
 	return m < c[2] ? m : c[2];
 }
 
+/* Hue in degrees, for chromatic colours. Wrap the comparison at red. */
+static int hue(const uint8_t *c)
+{
+	int high = max3(c), span = high - min3(c), h;
+
+	if (!span)
+		return 0;
+	if (high == c[0])
+		h = 60 * (c[1] - c[2]) / span;
+	else if (high == c[1])
+		h = 120 + 60 * (c[2] - c[0]) / span;
+	else
+		h = 240 + 60 * (c[0] - c[1]) / span;
+	return h < 0 ? h + 360 : h;
+}
+
+static int hue_gap(const uint8_t *a, const uint8_t *b)
+{
+	int gap = hue(a) - hue(b);
+
+	if (gap < 0)
+		gap = -gap;
+	return gap > 180 ? 360 - gap : gap;
+}
+
 static void test_palette_lightness_order(void)
 {
 	uint8_t p;
@@ -66,14 +91,14 @@ static void test_palette_roles_distinct(void)
 		for (a = ROLE_OFF; a < ROLE_COUNT; a++)
 			for (b = (uint8_t)(a + 1); b < ROLE_COUNT; b++)
 				CHECK(!same(palette_rgb(p, (enum role)a), palette_rgb(p, (enum role)b)));
-		/* Playable roles stay in the blue family; neutral states are exempt. */
-		for (a = ROLE_SCALE; a < ROLE_COUNT; a++) {
+		/* Every lit role carries the palette's hue, even the faintest. */
+		for (a = ROLE_OUT; a < ROLE_COUNT; a++) {
 			const uint8_t *c = palette_rgb(p, (enum role)a);
 
-			CHECK(c[2] > c[0] && c[2] > c[1]);
+			CHECK(min3(c) * 4 < max3(c));
+			CHECK(hue_gap(c, root) <= 30);
+			CHECK(max3(c) <= 63);
 		}
-		/* the root drives one channel fully */
-		CHECK_EQ(max3(root), 63);
 		/* root and fifth are a related pair, but visibly apart */
 		for (k = 0; k < 3; k++)
 			d += root[k] > fifth[k] ? root[k] - fifth[k] : fifth[k] - root[k];
@@ -81,20 +106,21 @@ static void test_palette_roles_distinct(void)
 		/* nothing is white or near white: white means sounding */
 		for (a = ROLE_OFF; a < ROLE_COUNT; a++)
 			CHECK(min3(palette_rgb(p, (enum role)a)) < 32);
-		/* the root's colour is no other palette's root */
-		for (a = (uint8_t)(p + 1); a < PALETTE_COUNT; a++)
-			CHECK(!same(root, palette_rgb(a, ROLE_ROOT)));
 	}
 }
 
-static void test_palette_out_is_one_grey(void)
+static void test_palette_hues_do_not_overlap(void)
 {
-	uint8_t p;
-	const uint8_t *grey = palette_rgb(0, ROLE_OUT);
+	uint8_t p, q, a, b;
 
-	CHECK(grey[0] == grey[1] && grey[1] == grey[2]);
-	for (p = 1; p < PALETTE_COUNT; p++)
-		CHECK(same(palette_rgb(p, ROLE_OUT), grey));
+	/* Compare every lit role with every role on another palette, since
+	 * the same scale degrees needn't line up across the split. */
+	for (p = 0; p < PALETTE_COUNT; p++)
+		for (q = (uint8_t)(p + 1); q < PALETTE_COUNT; q++)
+			for (a = ROLE_OUT; a < ROLE_COUNT; a++)
+				for (b = ROLE_OUT; b < ROLE_COUNT; b++)
+					CHECK(hue_gap(palette_rgb(p, (enum role)a),
+					              palette_rgb(q, (enum role)b)) >= 25);
 }
 
 static void test_palette_names(void)
@@ -118,6 +144,6 @@ void test_palette_all(void)
 {
 	RUN(test_palette_lightness_order);
 	RUN(test_palette_roles_distinct);
-	RUN(test_palette_out_is_one_grey);
+	RUN(test_palette_hues_do_not_overlap);
 	RUN(test_palette_names);
 }
